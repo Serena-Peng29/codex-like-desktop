@@ -22,7 +22,11 @@ vendor/codex/
 .codex/
 .data/
 tmp/
+output/
+.playwright-cli/
 
 # Local handoff documents requested to remain outside normal tracking
 AGENTS.md
 PROGRESS.md
+agent 折腾日志_20260825.docx
+docs/
