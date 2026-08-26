@@ -15,6 +15,7 @@
 - `docs`：架构、上游同步和阶段验收文档。
 - `infra`：本地开发和部署依赖。
 - `scripts`：构建、同步、测试、签名和发布脚本。
+- `.agents/skills`：项目本地技能；涉及安全、威胁建模、Playwright 或 CI 时先读取对应 `SKILL.md`。
 
 ## 当前事实
 
@@ -28,6 +29,13 @@
 - 登录：手机号、邮箱。
 - 分发：官网下载安装。
 - 上游 Codex 当前固定版本：`25a6e31`。
+
+## 已安装项目技能
+
+- `.agents/skills/security-best-practices`：认证、密钥、支付、API 和桌面安全检查。
+- `.agents/skills/security-threat-model`：对本地执行、sidecar、网关和计费链路做威胁建模。
+- `.agents/skills/playwright`：Web UI 和桌面相关可测试页面的端到端验证。
+- `.agents/skills/gh-fix-ci`：GitHub Actions 失败检查和修复流程。
 
 ## 安装、开发、检查和测试
 
