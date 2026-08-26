@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld("desktop", {
   },
   state: () => ipcRenderer.invoke("app:state"),
   chooseProject: () => ipcRenderer.invoke("project:choose"),
+  setProject: (path: string) => ipcRenderer.invoke("project:set", path),
+  clearProject: () => ipcRenderer.invoke("project:clear"),
   history: () => ipcRenderer.invoke("chat:history"),
   loadThread: (threadId: string) => ipcRenderer.invoke("chat:load", threadId),
   newThread: () => ipcRenderer.invoke("chat:new"),

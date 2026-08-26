@@ -7,8 +7,10 @@ declare global {
         toggleMaximize(): Promise<boolean>;
         close(): Promise<void>;
       };
-      state(): Promise<{ projectPath: string | null; activeThreadId: string | null; history: Array<{ id: string; preview?: string; name?: string | null; cwd?: string; updatedAt?: number; createdAt?: number; ephemeral?: boolean; status?: unknown }>; sidecar: string; gateway: string; gatewayMode: "remote" | "local" }>;
+      state(): Promise<{ projectPath: string | null; activeThreadId: string | null; unassignedThreadIds?: string[]; history: Array<{ id: string; preview?: string; name?: string | null; cwd?: string; updatedAt?: number; createdAt?: number; ephemeral?: boolean; status?: unknown }>; sidecar: string; gateway: string; gatewayMode: "remote" | "local" }>;
       chooseProject(): Promise<string | null>;
+      setProject(path: string): Promise<string>;
+      clearProject(): Promise<void>;
       history(): Promise<Array<{ id: string; preview?: string; name?: string | null; cwd?: string; updatedAt?: number; createdAt?: number; ephemeral?: boolean; status?: unknown }>>;
       loadThread(threadId: string): Promise<{ thread?: { id?: string; turns?: Array<{ items?: Array<Record<string, unknown>> }> } }>;
       newThread(): Promise<void>;

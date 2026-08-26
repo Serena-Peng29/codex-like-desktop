@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { ArrowUp, FolderOpen, Lightbulb, MessageCircle, MessageCirclePlus, Minus, PanelLeft, Paperclip, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, X } from "lucide-react";
 import "./styles.css";
+
+const brandFavicon = new URL("./brand-favicon.png", import.meta.url).href;
 
 type Tool = "diff" | "approval" | null;
 type Diff = { path: string; before: string; after: string; status: string };
@@ -9,13 +12,14 @@ type Permission = "ask" | "auto" | "full";
 type HistoryEntry = { id: string; preview?: string; name?: string | null; cwd?: string; updatedAt?: number; createdAt?: number; ephemeral?: boolean; status?: unknown };
 type ToolCall = { id: string; name: string; args: unknown; result: string; status: "running" | "done" };
 type ChatMessage = { id: string; role: "user" | "assistant"; content: string; reasoning?: string[]; tool?: ToolCall | null; streaming?: boolean; usage?: Record<string, number> };
+type ProjectGroup = { key: string; path: string | null; name: string; entries: HistoryEntry[]; isCurrent: boolean };
 
-const modelOptions = ["5.6 Sol", "5.6 Terra", "5.6 Luna", "5.5", "5.2"];
+const modelOptions = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.2"];
 const intensityOptions = ["低", "中", "高"];
 const permissionOptions: Array<{ value: Permission; label: string }> = [
-  { value: "ask", label: "请求批准" },
-  { value: "auto", label: "帮我批准" },
-  { value: "full", label: "完全访问权限" }
+  { value: "ask", label: "Workspace Write" },
+  { value: "auto", label: "Workspace Auto" },
+  { value: "full", label: "Workspace Full" }
 ];
 const permissionDescriptions: Record<Permission, string> = {
   ask: "编辑外部文件和使用互联网时始终询问",
@@ -26,6 +30,35 @@ const permissionDescriptions: Record<Permission, string> = {
 function projectName(path: string | null | undefined) {
   if (!path) return "未选择项目";
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+function projectKey(path: string | null | undefined) {
+  return path || "__local__";
+}
+
+function historyTitle(entry: HistoryEntry) {
+  return entry.name?.trim() || entry.preview?.trim() || "未命名会话";
+}
+
+function projectGroups(projectPath: string | null | undefined, history: HistoryEntry[] | undefined, unassignedThreadIds: string[] = []): ProjectGroup[] {
+  const groups = new Map<string, ProjectGroup>();
+  const unassigned = new Set(unassignedThreadIds);
+  const currentKey = projectKey(projectPath);
+  if (projectPath) groups.set(currentKey, { key: currentKey, path: projectPath, name: projectName(projectPath), entries: [], isCurrent: true });
+  for (const entry of history ?? []) {
+    const path = entry.cwd || null;
+    if (!path || unassigned.has(entry.id)) continue;
+    const key = projectKey(path);
+    const existing = groups.get(key);
+    if (existing) existing.entries.push(entry);
+    else groups.set(key, { key, path, name: projectName(path), entries: [entry], isCurrent: key === currentKey });
+  }
+  return [...groups.values()].sort((a, b) => Number(b.isCurrent) - Number(a.isCurrent) || a.name.localeCompare(b.name));
+}
+
+function recentHistory(projectPath: string | null | undefined, history: HistoryEntry[] | undefined, unassignedThreadIds: string[] = []) {
+  const unassigned = new Set(unassignedThreadIds);
+  return (history ?? []).filter((entry) => !entry.cwd || unassigned.has(entry.id)).sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0)).slice(0, 12);
 }
 
 function textFromThreadItem(item: Record<string, unknown>) {
@@ -98,17 +131,25 @@ function App() {
   const [state, setState] = useState<{
     projectPath: string | null;
     activeThreadId: string | null;
+    unassignedThreadIds?: string[];
     history: HistoryEntry[];
     sidecar: string;
     gateway: string;
     gatewayMode: "remote" | "local";
   }>();
+  const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
+  const [expandedSessionLists, setExpandedSessionLists] = useState<Record<string, boolean>>({});
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [model, setModel] = useState("5.6 Sol");
+  const [model, setModel] = useState("gpt-5.6-sol");
   const [intensity, setIntensity] = useState("中");
   const [permission, setPermission] = useState<Permission>("ask");
   const [openMenu, setOpenMenu] = useState<"permission" | "model" | null>(null);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [composerToolsOpen, setComposerToolsOpen] = useState(false);
+  const [planMode, setPlanMode] = useState(false);
+  const [sidebarWidth, setSidebarWidth] = useState<number | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [recentPrompts, setRecentPrompts] = useState<string[]>([
     "检查这个项目的结构并给出改进建议",
     "为这个项目补充一份 README",
@@ -123,6 +164,42 @@ function App() {
   const [sending, setSending] = useState(false);
   const activeAssistantId = useRef<string | null>(null);
   const conversationScrollRef = useRef<HTMLDivElement | null>(null);
+  const resizingSidebarRef = useRef(false);
+
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent) => {
+      if (!resizingSidebarRef.current) return;
+      setSidebarWidth(Math.max(240, Math.min(520, event.clientX)));
+    };
+    const onPointerUp = () => { resizingSidebarRef.current = false; };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => { window.removeEventListener("pointermove", onPointerMove); window.removeEventListener("pointerup", onPointerUp); };
+  }, []);
+
+  useEffect(() => {
+    const closeMenusOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target instanceof Element && target.closest(".composer-tools-menu, .composer-menu, .workspace-menu, .composer-icon, .menu-trigger, .context-picker")) return;
+      setOpenMenu(null);
+      setComposerToolsOpen(false);
+      setWorkspaceMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeMenusOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeMenusOnOutsidePointer);
+  }, []);
+
+  const groups = projectGroups(state?.projectPath, state?.history, state?.unassignedThreadIds);
+  const recentEntries = recentHistory(state?.projectPath, state?.history, state?.unassignedThreadIds);
+
+  useEffect(() => {
+    if (!groups.length) return;
+    setExpandedProjects((current) => {
+      const next = { ...current };
+      for (const group of groups) if (!(group.key in next)) next[group.key] = true;
+      return next;
+    });
+  }, [state?.projectPath, state?.history]);
 
   useEffect(() => {
     const element = conversationScrollRef.current;
@@ -206,8 +283,39 @@ function App() {
 
   async function chooseProject() {
     const path = await window.desktop.chooseProject();
+    setWorkspaceMenuOpen(false);
     setState(await window.desktop.state());
     if (path) setNotice(`已连接到 ${projectName(path)}`);
+  }
+
+  async function clearProject() {
+    await window.desktop.clearProject();
+    setWorkspaceMenuOpen(false);
+    setMessages([]);
+    activeAssistantId.current = null;
+    setDiff(undefined);
+    setPendingApproval(undefined);
+    setState(await window.desktop.state());
+    setNotice("已切换为不使用工作区");
+  }
+
+  async function startNewChat(projectPath?: string) {
+    try {
+      if (projectPath && projectPath !== state?.projectPath) await window.desktop.setProject(projectPath);
+      await window.desktop.newThread();
+      setMessages([]);
+      setInput("");
+      activeAssistantId.current = null;
+      setDiff(undefined);
+      setPendingApproval(undefined);
+      setOpenMenu(null);
+      setComposerToolsOpen(false);
+      setWorkspaceMenuOpen(false);
+      setState(await window.desktop.state());
+      setNotice("");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
   }
 
   async function loadHistory(threadId: string) {
@@ -324,34 +432,59 @@ function App() {
   return (
     <div className="app-window">
       <div className="global-menubar">
+        <div className="window-title"><img src={brandFavicon} alt="" aria-hidden="true" /><span>Codex Harness</span></div>
         <div className="window-controls"><button className="menu-icon" title="切换侧栏" aria-label="切换侧栏">◧</button><button className="menu-icon" title="后退" aria-label="后退">←</button><button className="menu-icon muted-icon" title="前进" aria-label="前进">→</button></div>
         <nav className="app-menus" aria-label="应用菜单"><button>文件</button><button>编辑</button><button>视图</button><button>帮助</button></nav>
-        <div className="window-actions"><button className="menu-icon" title="最小化" aria-label="最小化" onClick={() => void window.desktop?.window.minimize()}>−</button><button className="menu-icon" title="最大化" aria-label="最大化" onClick={() => void window.desktop?.window.toggleMaximize()}>□</button><button className="menu-icon close-icon" title="关闭" aria-label="关闭" onClick={() => void window.desktop?.window.close()}>×</button></div>
+        <div className="window-actions"><button className="menu-icon" title="最小化" aria-label="最小化" onClick={() => void window.desktop?.window.minimize()}><Minus size={16} /></button><button className="menu-icon" title="最大化" aria-label="最大化" onClick={() => void window.desktop?.window.toggleMaximize()}><Square size={15} /></button><button className="menu-icon close-icon" title="关闭" aria-label="关闭" onClick={() => void window.desktop?.window.close()}><X size={17} /></button></div>
       </div>
       <div className="app-shell">
-      <aside className="sidebar">
+      <aside className={`sidebar ${sidebarCollapsed ? "is-collapsed" : ""}`} style={sidebarCollapsed ? { width: 64, flexBasis: 64 } : sidebarWidth === null ? undefined : { width: sidebarWidth, flexBasis: sidebarWidth }}>
         <div className="sidebar-header">
-          <div className="brand-copy"><strong>Codex</strong><span className="brand-chevron">⌄</span></div>
-          <div className="sidebar-actions"><button className="icon-button" title="搜索" aria-label="搜索">⌕</button></div>
+          <div className="brand-copy"><img className="brand-mark-image" src={brandFavicon} alt="" aria-hidden="true" /><strong>Codex</strong><span className="brand-badge">HARNESS</span></div>
+          <div className="sidebar-actions"><button className="icon-button sidebar-collapse" title={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"} aria-label={sidebarCollapsed ? "展开侧栏" : "折叠侧栏"} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><PanelLeft size={19} /></button></div>
         </div>
 
-        <button className="new-chat-button" onClick={() => { void window.desktop?.newThread(); setMessages([]); activeAssistantId.current = null; setDiff(undefined); setPendingApproval(undefined); setNotice(""); }}><span className="new-chat-icon">↗</span> 新对话</button>
+        <button className="new-chat-button" onClick={() => void startNewChat()}><span className="new-chat-icon"><MessageCirclePlus size={19} /></span><span>新对话</span></button>
 
         <div className="sidebar-scroll">
           <div className="sidebar-section">
-            <div className="section-label section-label-with-action"><span>项目</span><button className="tiny-action" title="选择项目" aria-label="选择项目" onClick={chooseProject}>＋</button></div>
-            <button className="project-row active-project" onClick={chooseProject} title={state?.projectPath ?? "选择本地项目"}>
-              <span className="folder-icon">□</span>
-              <span className="thread-copy"><strong>{projectName(state?.projectPath)}</strong><small>{state?.projectPath ?? "选择本地项目"}</small></span>
-            </button>
-            {state?.history?.map((entry) => <button className={`session-row ${entry.id === state.activeThreadId ? "active-session" : ""}`} title={entry.cwd ?? "本地会话"} key={entry.id} onClick={() => void loadHistory(entry.id)}><span className="session-status">◌</span><span className="thread-copy"><strong>{entry.name || entry.preview || "本地编程任务"}</strong><small>{entry.cwd || "未归档到项目"}</small></span></button>)}
+            <div className="section-label section-label-with-action"><span>工作区</span><span className="workspace-actions"><button className="tiny-action" title="搜索会话" aria-label="搜索会话"><Search size={17} /></button><button className="tiny-action" title="筛选工作区" aria-label="筛选工作区"><SlidersHorizontal size={17} /></button><button className="tiny-action" title="添加或选择项目" aria-label="添加或选择项目" onClick={chooseProject}><Plus size={18} /></button></span></div>
+            <div className="project-list">
+              {groups.length ? groups.map((group) => {
+                const expanded = expandedProjects[group.key] ?? group.isCurrent;
+                return <div className={`project-group ${group.isCurrent ? "current-project-group" : ""}`} key={group.key}>
+                  <div className="project-row-container">
+                    <button className={`project-row ${group.isCurrent ? "active-project" : ""}`} onClick={() => setExpandedProjects((current) => ({ ...current, [group.key]: !expanded }))} title={group.name} aria-expanded={expanded}>
+                      <span className="folder-icon" aria-hidden="true"><FolderOpen size={19} /></span>
+                      <span className="thread-copy"><strong>{group.name}</strong></span>
+                      {group.entries.length > 0 && <span className="project-count">{group.entries.length}</span>}
+                    </button>
+                    <button className="project-new-chat" type="button" title={`在 ${group.name} 中新建会话`} aria-label={`在 ${group.name} 中新建会话`} onClick={(event) => { event.stopPropagation(); void startNewChat(group.path ?? undefined); }}><SquarePen size={17} /></button>
+                  </div>
+                  {expanded && <div className="project-sessions">
+                    {group.entries.length ? <>
+                      {(expandedSessionLists[group.key] ? group.entries : group.entries.slice(0, 3)).map((entry) => <button className={`session-row ${entry.id === state?.activeThreadId ? "active-session" : ""}`} title={entry.cwd ?? "本地会话"} key={entry.id} onClick={() => void loadHistory(entry.id)}><span className="session-status" aria-hidden="true"><MessageCircle size={13} /></span><span className="thread-copy"><strong>{historyTitle(entry)}</strong></span></button>)}
+                      {group.entries.length > 3 && <button className="show-more-sessions" type="button" onClick={() => setExpandedSessionLists((current) => ({ ...current, [group.key]: !current[group.key] }))}>{expandedSessionLists[group.key] ? "收起显示" : "展开显示"}</button>}
+                    </> : <div className="project-empty">暂无会话</div>}
+                  </div>}
+                </div>;
+              }) : <div className="sidebar-empty">选择一个本地项目开始</div>}
+            </div>
+          </div>
+
+          <div className="sidebar-section recent-section">
+            <div className="section-label section-label-with-action"><span>最近</span><span className="recent-count">{recentEntries.length || ""}</span></div>
+            <div className="recent-list">
+              {recentEntries.length ? recentEntries.map((entry) => <button className={`recent-session ${entry.id === state?.activeThreadId ? "active-recent" : ""}`} title="未选择项目的本地会话" key={`recent-${entry.id}`} onClick={() => void loadHistory(entry.id)}><span className="thread-copy"><strong>{historyTitle(entry)}</strong></span></button>) : <div className="sidebar-empty">未选择项目的会话会显示在这里</div>}
+            </div>
           </div>
         </div>
 
         <div className="sidebar-footer">
-          <button className="settings-button"><span>⚙</span> 设置</button>
+          <button className="settings-button"><Settings size={17} /> 设置</button>
         </div>
       </aside>
+      <div className={`sidebar-divider ${sidebarCollapsed ? "is-collapsed" : ""}`} role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => { event.preventDefault(); resizingSidebarRef.current = true; }} onDoubleClick={() => setSidebarCollapsed((collapsed) => !collapsed)} />
 
       <section className="workspace">
         <header className="topbar">
@@ -364,13 +497,11 @@ function App() {
         </header>
 
         <div className="workspace-body">
-          <main className="conversation-pane">
+          <main className={`conversation-pane ${hasConversation ? "has-conversation" : "empty-conversation"}`}>
             <div className="conversation-scroll" ref={conversationScrollRef}>
               <div className="message-column">
                 {!hasConversation && <div className="welcome-block">
-                  <div className="welcome-icon">W</div>
-                  <h1>你想构建什么？</h1>
-                  <p>描述一个任务，让 Way2AGI 在当前项目中帮你完成。</p>
+                  <div className="welcome-brand"><img className="welcome-brand-image" src={brandFavicon} alt="" aria-hidden="true" /><h1>Codex Harness</h1></div>
                   <div className="welcome-chips" aria-label="建议提示">
                     {recentPrompts.slice(0, 3).map((prompt) => <button key={prompt} onClick={() => setInput(prompt)}>{prompt}<span aria-hidden="true">↗</span></button>)}
                   </div>
@@ -379,7 +510,7 @@ function App() {
                     {recentPrompts.length ? recentPrompts.map((prompt) => <button className="recent-prompt" key={`recent-${prompt}`} onClick={() => setInput(prompt)}><span className="recent-icon">◷</span><span>{prompt}</span><span className="recent-arrow" aria-hidden="true">↗</span></button>) : <div className="recent-empty">发送过的提示会出现在这里</div>}
                   </div>
                 </div>}
-                {messages.map((message) => message.role === "user" ? <div className="message user-message" key={message.id}><div className="message-avatar user-avatar">你</div><div className="message-content"><div className="message-meta"><strong>你</strong><span>刚刚</span></div><p>{message.content}</p></div></div> : <div className="message assistant-message" key={message.id}><div className="message-avatar agent-avatar">W</div><div className="message-content"><div className="message-meta"><strong>Way2AGI Agent</strong><span className="model-pill">GPT</span></div><ReasoningBlock steps={message.reasoning} /><ToolCallCard tool={message.tool} /><p className="assistant-copy">{message.content}{message.streaming && <span className="stream-caret" aria-hidden="true" />}</p><div className="message-footer"><span className="success-mark">{message.streaming ? "◌" : "✓"}</span> {message.streaming ? "生成中" : "已完成"}<span>·</span> {message.usage?.totalTokens ? `${message.usage.totalTokens} tokens` : "流式输出"}</div></div></div>)}
+                {messages.map((message) => message.role === "user" ? <div className="message user-message" key={message.id}><div className="message-content"><p>{message.content}</p></div></div> : <div className="message assistant-message" key={message.id}><div className="message-content"><ReasoningBlock steps={message.reasoning} /><ToolCallCard tool={message.tool} /><p className="assistant-copy">{message.content}{message.streaming && <span className="stream-caret" aria-hidden="true" />}</p><div className="message-footer"><span className="success-mark">{message.streaming ? "◌" : "✓"}</span> {message.streaming ? "生成中" : "已完成"}<span>·</span> {message.usage?.totalTokens ? `${message.usage.totalTokens} tokens` : "流式输出"}</div></div></div>)}
                 {(diff || pendingApproval) && <div className="activity-strip"><span>◈</span><span>{diff ? "有一项文件差异待确认" : "有一条命令等待审批"}</span><button onClick={() => setTool(diff ? "diff" : "approval")}>查看</button></div>}
               </div>
             </div>
@@ -387,8 +518,15 @@ function App() {
             <div className="composer-area">
               <div className="composer">
                 {errorMessage && <div className="composer-error" role="alert">{errorMessage}</div>}
-                <textarea value={input} onChange={(event) => { setInput(event.target.value); setErrorMessage(""); }} onKeyDown={handleComposerKeyDown} placeholder="输入后续修改要求" aria-label="任务输入" />
+                {!hasConversation && <div className="launcher-context"><div className="workspace-picker-wrap"><button className="context-picker" onClick={() => setWorkspaceMenuOpen((open) => !open)} title="选择工作区" aria-haspopup="menu" aria-expanded={workspaceMenuOpen}><FolderOpen size={17} /><strong>{projectName(state?.projectPath)}</strong></button>{workspaceMenuOpen && <div className="workspace-menu" role="menu"><button role="menuitem" onClick={() => void chooseProject()}>选择文件夹…</button><button role="menuitem" onClick={() => void clearProject()}>不使用工作区</button></div>}</div></div>}
+                <textarea value={input} onChange={(event) => { setInput(event.target.value); setErrorMessage(""); }} onKeyDown={handleComposerKeyDown} placeholder={hasConversation ? "输入后续修改要求" : "描述你想要构建的内容"} aria-label="任务输入" />
                 <div className="composer-menu-layer">
+                  {composerToolsOpen && <div className="composer-tools-menu" role="menu" aria-label="添加工具">
+                    <div className="composer-tools-title">添加</div>
+                    <button role="menuitem" onClick={() => { setComposerToolsOpen(false); setNotice("已打开文件和文件夹选择"); }}><Paperclip size={18} /><strong>文件和文件夹</strong></button>
+                    <button role="menuitem" onClick={() => { setComposerToolsOpen(false); setNotice("目标设置已准备"); }}><Target size={18} /><strong>目标</strong><span>设置要持续追求的目标</span></button>
+                    <button role="menuitem" className={planMode ? "tool-selected" : ""} onClick={() => { setPlanMode((active) => !active); setComposerToolsOpen(false); setNotice(planMode ? "已关闭计划模式" : "已开启计划模式"); }}><Lightbulb size={18} /><strong>计划模式</strong><span>{planMode ? "已开启计划模式" : "开启计划模式"}</span></button>
+                  </div>}
                   {openMenu === "permission" && <div className="composer-menu permission-menu" role="menu" aria-label="命令权限">
                     <div className="menu-title">应如何批准本地操作？</div>
                     {permissionOptions.map((option) => <button className={`permission-option ${permission === option.value ? "selected-option" : ""}`} role="menuitem" key={option.value} onClick={() => { setPermission(option.value); setOpenMenu(null); setNotice(`权限已切换为${option.label}`); }}><span className="permission-option-icon">{option.value === "ask" ? "?" : option.value === "auto" ? "◷" : "!"}</span><span className="permission-option-copy"><strong>{option.label}</strong><small>{permissionDescriptions[option.value]}</small></span>{permission === option.value && <span className="option-check">✓</span>}</button>)}
@@ -402,8 +540,8 @@ function App() {
                   </div>}
                 </div>
                 <div className="composer-footer">
-                  <div className="composer-left"><button className="composer-icon" title="添加上下文" aria-label="添加上下文">＋</button><button className={`menu-trigger permission-trigger ${permission !== "ask" ? "permission-selected" : ""}`} title="命令权限" aria-label="命令权限" aria-expanded={openMenu === "permission"} onClick={() => setOpenMenu(openMenu === "permission" ? null : "permission")}><span>{permissionOptions.find((option) => option.value === permission)?.label}</span></button></div>
-                  <div className="composer-right"><button className="menu-trigger model-trigger" title="选择模型与推理强度" aria-label="选择模型与推理强度" aria-expanded={openMenu === "model"} onClick={() => setOpenMenu(openMenu === "model" ? null : "model")}><span className="model-status-dot" /><span>{model}</span><span className="intensity-label">{intensity}</span></button><button className="send-button" title={`发送（${model}，${intensity}强度）`} aria-label="发送" onClick={() => void runChat()} disabled={!input.trim() || sending}>↑</button></div>
+                  <div className="composer-left"><button className="composer-icon" title="添加上下文" aria-label="添加上下文" aria-expanded={composerToolsOpen} onClick={() => { setComposerToolsOpen((open) => !open); setOpenMenu(null); }}><Plus size={19} /></button><button className={`menu-trigger permission-trigger ${permission !== "ask" ? "permission-selected" : ""}`} title="命令权限" aria-label="命令权限" aria-expanded={openMenu === "permission"} onClick={() => { setOpenMenu(openMenu === "permission" ? null : "permission"); setComposerToolsOpen(false); }}><span>{permissionOptions.find((option) => option.value === permission)?.label}</span></button></div>
+                  <div className="composer-right"><button className="menu-trigger model-trigger" title="选择模型与推理强度" aria-label="选择模型与推理强度" aria-expanded={openMenu === "model"} onClick={() => setOpenMenu(openMenu === "model" ? null : "model")}><span className="model-status-dot" /><span>{model}</span><span className="intensity-label">{intensity}</span></button><button className="send-button" title={`发送（${model}，${intensity}强度）`} aria-label="发送" onClick={() => void runChat()} disabled={!input.trim() || sending}><ArrowUp size={20} /></button></div>
                 </div>
               </div>
             </div>

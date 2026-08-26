@@ -4,7 +4,27 @@
   "private": true,
   "type": "module",
   "main": "dist/main.js",
-  "scripts": { "dev": "vite --config vite.config.ts", "build": "vite build --config vite.config.ts" },
-  "build": { "appId": "com.way2agi.code", "productName": "Way2AGI Code", "files": ["dist/**", "package.json"], "extraResources": [{ "from": "resources", "to": "sidecar" }] },
-  "dependencies": { "react": "^18.3.1", "react-dom": "^18.3.1" }
+  "scripts": {
+    "dev": "vite --config vite.config.ts",
+    "build": "vite build --config vite.config.ts"
+  },
+  "build": {
+    "appId": "com.way2agi.code",
+    "productName": "Codex Harness",
+    "files": [
+      "dist/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources",
+        "to": "sidecar"
+      }
+    ]
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
 }

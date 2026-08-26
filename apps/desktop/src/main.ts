@@ -15,7 +15,7 @@ try { process.loadEnvFile?.(envPath); } catch { /* .env is optional in packaged 
 type SidecarServerRequest = { id: number | string; method: string; params?: Record<string, unknown> };
 type SidecarNotification = { method: string; params?: Record<string, unknown> };
 type ThreadSummary = { id: string; preview?: string; name?: string | null; cwd?: string; updatedAt?: number; createdAt?: number; ephemeral?: boolean; status?: unknown };
-type ClientState = { projectPath?: string | null; activeThreadId?: string | null };
+type ClientState = { projectPath?: string | null; activeThreadId?: string | null; unassignedThreadIds?: string[] };
 
 function discoverNpmCodexBinary() {
   if (process.platform !== "win32") return undefined;
@@ -60,7 +60,7 @@ class SidecarManager {
     } catch { /* sidecar logs are ignored */ } });
     this.child.on("exit", () => { this.child = null; this.status = "stopped"; });
     this.child.stderr.on("data", () => undefined);
-    try { await this.request("initialize", { clientInfo: { name: "Way2AGI Code", title: "Way2AGI Code", version: app.getVersion() }, capabilities: { experimentalApi: true } }); this.notify("initialized"); this.status = "running"; }
+    try { await this.request("initialize", { clientInfo: { name: "Codex Harness", title: "Codex Harness", version: app.getVersion() }, capabilities: { experimentalApi: true } }); this.notify("initialized"); this.status = "running"; }
     catch { this.status = "failed"; }
   }
 
@@ -88,17 +88,19 @@ const gatewayModel = process.env.MODEL ?? "gpt-4o-mini";
 const approvals = new Map<string, { command: string; cwd: string }>();
 const allowedCommands = new Set(["node", "npm", "pnpm", "git", "cargo", "python", "python3", "echo"]);
 let activeThreadId: string | null = null;
+const unassignedThreadIds = new Set<string>();
 let activeTurn: { threadId: string; turnId?: string; output: string; usage: Record<string, number>; resolve: (result: { output: string; usage: Record<string, number> }) => void; reject: (error: Error) => void } | null = null;
 
 function clientStatePath() { return join(app.getPath("userData"), "way2agi-state.json"); }
 function persistClientState() {
-  try { writeFileSync(clientStatePath(), JSON.stringify({ projectPath, activeThreadId } satisfies ClientState), "utf8"); } catch { /* state persistence is best effort */ }
+  try { writeFileSync(clientStatePath(), JSON.stringify({ projectPath, activeThreadId, unassignedThreadIds: [...unassignedThreadIds] } satisfies ClientState), "utf8"); } catch { /* state persistence is best effort */ }
 }
 function loadClientState() {
   try {
     const value = JSON.parse(readFileSync(clientStatePath(), "utf8")) as ClientState;
     if (value.projectPath && existsSync(value.projectPath)) projectPath = value.projectPath;
     activeThreadId = typeof value.activeThreadId === "string" ? value.activeThreadId : null;
+    for (const threadId of value.unassignedThreadIds ?? []) if (typeof threadId === "string" && threadId) unassignedThreadIds.add(threadId);
   } catch { /* first launch or malformed state */ }
 }
 
@@ -154,12 +156,15 @@ function createWindow() {
 async function runAppServerTurn(input: string, options?: { effort?: string }) {
   if (activeTurn) throw new Error("turn_already_running");
   const cwd = projectPath ?? undefined;
+  const threadWithoutProject = !cwd;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     if (!activeThreadId) {
       const result = await sidecar.request("thread/start", { ...(cwd ? { cwd, sandbox: "workspace-write" } : {}), approvalPolicy: "on-request", ephemeral: false });
       const thread = (result as { thread?: { id?: string }; id?: string } | null) ?? {};
       activeThreadId = thread.thread?.id ?? thread.id ?? null;
       if (!activeThreadId) throw new Error("thread_start_missing_id");
+      if (threadWithoutProject) unassignedThreadIds.add(activeThreadId);
+      else unassignedThreadIds.delete(activeThreadId);
       persistClientState();
     }
     try {
@@ -218,10 +223,12 @@ app.whenReady().then(async () => {
   ipcMain.handle("window:minimize", () => BrowserWindow.getFocusedWindow()?.minimize());
   ipcMain.handle("window:toggle-maximize", () => { const target = BrowserWindow.getFocusedWindow(); if (!target) return false; if (target.isMaximized()) target.unmaximize(); else target.maximize(); return target.isMaximized(); });
   ipcMain.handle("window:close", () => BrowserWindow.getFocusedWindow()?.close());
-  ipcMain.handle("app:state", async () => ({ projectPath, activeThreadId, history: await listConversationHistory(), sidecar: sidecar.status, gateway: gatewayUrl, gatewayMode: gatewayIsRemote ? "remote" : "local" }));
+  ipcMain.handle("app:state", async () => ({ projectPath, activeThreadId, unassignedThreadIds: [...unassignedThreadIds], history: await listConversationHistory(), sidecar: sidecar.status, gateway: gatewayUrl, gatewayMode: gatewayIsRemote ? "remote" : "local" }));
   ipcMain.handle("project:choose", async () => { const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] }); projectPath = result.canceled ? projectPath : result.filePaths[0] ?? projectPath; if (projectPath) await sidecar.request("workspace/set", { path: projectPath }).catch(() => undefined); persistClientState(); return projectPath; });
+  ipcMain.handle("project:set", async (_event, path: string) => { if (typeof path !== "string" || !path.trim()) throw new Error("invalid_project_path"); projectPath = path; activeThreadId = null; await sidecar.request("workspace/set", { path: projectPath }).catch(() => undefined); persistClientState(); return projectPath; });
+  ipcMain.handle("project:clear", () => { projectPath = null; activeThreadId = null; persistClientState(); return undefined; });
   ipcMain.handle("chat:history", () => listConversationHistory());
-  ipcMain.handle("chat:load", async (_event, threadId: string) => { const result = await readConversationThread(threadId); activeThreadId = threadId; persistClientState(); return result; });
+  ipcMain.handle("chat:load", async (_event, threadId: string) => { const result = await readConversationThread(threadId); activeThreadId = threadId; const cwd = (result as { thread?: { cwd?: unknown } } | null)?.thread?.cwd; if (typeof cwd === "string" && cwd) unassignedThreadIds.delete(threadId); else unassignedThreadIds.add(threadId); persistClientState(); return result; });
   ipcMain.handle("chat:new", () => { if (activeTurn) throw new Error("turn_already_running"); activeThreadId = null; persistClientState(); });
   ipcMain.handle("chat:stream", (_event, input: string, options?: { effort?: string }) => runAppServerTurn(input, options));
   ipcMain.handle("diff:preview", async (_event, input: string) => { if (!projectPath) throw new Error("project_required"); const file = join(projectPath, "codex-like-demo.txt"); const before = existsSync(file) ? readFileSync(file, "utf8") : ""; const after = `${before}${before ? "\n" : ""}${input}\n`; await sidecar.request("files/diff", { path: file, before, after }).catch(() => undefined); return { path: file, before, after, status: before ? "modified" : "created" }; });
