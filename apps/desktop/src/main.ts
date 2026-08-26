@@ -154,17 +154,32 @@ function createWindow() {
 async function runAppServerTurn(input: string, options?: { effort?: string }) {
   if (activeTurn) throw new Error("turn_already_running");
   const cwd = projectPath ?? undefined;
-  if (!activeThreadId) {
-    const result = await sidecar.request("thread/start", { ...(cwd ? { cwd, sandbox: "workspace-write" } : {}), approvalPolicy: "on-request", ephemeral: false });
-    const thread = (result as { thread?: { id?: string }; id?: string } | null) ?? {};
-    activeThreadId = thread.thread?.id ?? thread.id ?? null;
-    if (!activeThreadId) throw new Error("thread_start_missing_id");
-    persistClientState();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (!activeThreadId) {
+      const result = await sidecar.request("thread/start", { ...(cwd ? { cwd, sandbox: "workspace-write" } : {}), approvalPolicy: "on-request", ephemeral: false });
+      const thread = (result as { thread?: { id?: string }; id?: string } | null) ?? {};
+      activeThreadId = thread.thread?.id ?? thread.id ?? null;
+      if (!activeThreadId) throw new Error("thread_start_missing_id");
+      persistClientState();
+    }
+    try {
+      return await new Promise<{ output: string; usage: Record<string, number> }>((resolvePromise, reject) => {
+        activeTurn = { threadId: activeThreadId!, output: "", usage: {}, resolve: resolvePromise, reject };
+        void sidecar.request("turn/start", { threadId: activeThreadId, ...(cwd ? { cwd, sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd] } } : {}), approvalPolicy: "on-request", effort: options?.effort ?? "medium", input: [{ type: "text", text: input }] }).catch((error: unknown) => { if (activeTurn) { activeTurn = null; reject(error instanceof Error ? error : new Error(String(error))); } });
+      }).finally(() => { activeTurn = null; });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (attempt === 0 && /thread\s+not\s+found/i.test(message)) {
+        // The persisted ID can outlive a changed CODEX_HOME or a deleted
+        // rollout. Start a fresh durable thread instead of surfacing a stale ID.
+        activeThreadId = null;
+        persistClientState();
+        continue;
+      }
+      throw error;
+    }
   }
-  return await new Promise<{ output: string; usage: Record<string, number> }>((resolvePromise, reject) => {
-    activeTurn = { threadId: activeThreadId!, output: "", usage: {}, resolve: resolvePromise, reject };
-    void sidecar.request("turn/start", { threadId: activeThreadId, ...(cwd ? { cwd, sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd] } } : {}), approvalPolicy: "on-request", effort: options?.effort ?? "medium", input: [{ type: "text", text: input }] }).catch((error: unknown) => { if (activeTurn) { activeTurn = null; reject(error instanceof Error ? error : new Error(String(error))); } });
-  }).finally(() => { activeTurn = null; });
+  throw new Error("turn_start_failed");
 }
 
 app.whenReady().then(async () => {
