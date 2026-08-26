@@ -4,82 +4,70 @@
 
 - 日期：2026-08-26
 - 阶段：Phase 0 技术验证骨架
-- 状态：Electron 桌面端、mock sidecar、测试网关和基础账本已可编译测试；真实 Rust sidecar 尚待具备 cargo 的构建环境
-- 桌面技术栈已确定为 Electron + React + TypeScript。
+- 状态：Electron 桌面端、mock sidecar、测试网关、内存账本和协议检查已可构建测试；真实 sidecar 和生产后端尚未完成。
 
 ## 已完成
 
-- 在 `D:\PTT\Way2AGI\codex-like-desktop` 建立项目根目录。
-- 初始化根目录 Git 仓库。
-- 建立 `apps`、`services`、`packages`、`vendor`、`docs`、`infra` 和 `scripts` 结构。
-- 克隆 Codex 开源源码到 `vendor/codex`。
-- 固定上游版本：`25a6e31`。
-- 写入产品架构、Phase 0 验收和上游同步文档。
-- 确定产品方向：Windows/macOS、GPT、OpenAI 兼容协议、手机号/邮箱登录、微信/支付宝扫码支付、官网下载安装。
-- 初始化 Electron + React + TypeScript 工程，启用 `contextIsolation`、关闭 `nodeIntegration` 并通过 preload 白名单暴露 IPC。
-- 实现 sidecar 生命周期管理、开发 mock JSON-RPC sidecar、资源目录打包配置和固定上游 commit 的构建脚本。
-- 实现本地项目选择、差异预览/确认写入、命令审批和本机白名单进程执行。
-- 实现 OpenAI Responses 风格 SSE 测试网关，以及套餐额度优先、超额额度和余额不足的内存账本。
-- 添加 Tauri/Electron 评估记录、TypeScript/Vite 构建、启动握手检查和服务自动化测试。
-- 按固定上游 schema 修正真实 App Server `initialize`/`initialized` 握手格式，并添加真实 binary 协议冒烟命令。
-- 添加上游 schema 兼容性检查，覆盖 `thread/start`、`turn/start`、文件读写、命令审批和流式通知方法。
-- 修复 Electron `file://` renderer 白屏：Vite 改用相对 asset 路径，并在启动检查中防止绝对 `/assets/` 路径回归。
-- 按 Codex Desktop 参考图重做 Renderer 工作区：深色窗口菜单、简化侧栏（新对话/项目/设置）、会话标题栏、Agent/文件视图、悬浮输入框、差异与命令审批工具面板，并补充窄窗口响应式布局。
-- 将主区改为 Prompt Input 3 风格的 prompt launcher：建议提示、最近提示历史和清除操作；composer 增加权限、模型和推理强度选择。权限选择只改变会话展示状态，实际本地命令仍由主进程审批链路控制。
-- 添加 React Bits Pro registry 的 `components.json` 配置与 `REACTBITS_LICENSE_KEY` 环境变量占位符；未提供许可证时不下载或伪装 premium block 源码。
-- 根据 Prompt Input 参考图移除 composer 状态提示、权限图标、下拉箭头和原生 textarea resize 手柄；权限与模型菜单改为自定义浮层并验证选中态。
-- 接入真实 App Server 命令审批回调：监听 `item/commandExecution/requestApproval`，将请求转发至 renderer；“允许一次”回传 `{ decision: "accept" }`，“拒绝”回传 `{ decision: "decline" }`。
-- 将 `chat:stream` 切换为真实 App Server `thread/start` + `turn/start` 临时会话，使用 `workspace-write` 沙箱和 `on-request` 审批策略；收集 `item/agentMessage/delta` 与 `turn/completed` 返回对话结果。
-- 修复发送按钮被 sidecar 状态永久禁用的问题：改为有输入即可发送、请求期间禁用，并对未选择项目或非 Electron 预览显示错误提示。
-- 修复 sidecar 启动路径：只启动真实 Codex App Server 二进制，不再从 Electron 进程拉起 mock 脚本。
-- 将消息发送快捷键改为 Enter，Shift+Enter 保留换行。
-- 允许未选择项目时创建真实持久 App Server 线程；有项目时仍使用项目工作区和审批沙箱。
-- 将新线程从 `ephemeral: true` 改为 `ephemeral: false`，通过 `thread/list`、`thread/read` 和 `thread/resume` 接入 Codex 本地 rollout 历史。
-- 保存最后项目与线程到 Electron userData，启动时恢复并在侧栏展示本地会话记录；新增新对话时显式创建新线程。
-- 将 `ai-chat-1-demo` 的 `AIChat1.jsx` 从 `buildAssistantReply`/延时模拟切换为桌面端真实 App Server 流事件：文本增量、推理摘要、工具生命周期、命令输出增量和审批请求；保留原有 Composer 输入框与自动滚动/折叠推理/工具卡片展示。
-- 将上述 AI Chat 交互正式迁移到桌面 Renderer：会话改为多消息列表，支持用户/助手气泡、真实流式光标、可折叠推理步骤、工具调用卡片和工具输出增量；原有输入框保持不变。
-- 增加持久线程失效保护：`turn/start` 遇到 `thread not found` 时清除过期 ID、创建新的 durable thread 并重试当前请求。
+- 固定上游 Codex commit `25a6e31`，建立 `apps`、`services`、`packages`、`vendor`、`docs`、`infra` 和 `scripts` 工程结构，并记录架构、Tauri/Electron 评估和上游同步规则。
+- 建立 Electron + React + TypeScript 桌面端：关闭 `nodeIntegration`、开启 `contextIsolation`，通过 preload 白名单提供 IPC；支持项目选择、持久线程、历史恢复、流式消息、推理/工具展示、文件差异和命令审批。
+- 建立 App Server 桥接代码路径：sidecar 生命周期、请求/响应匹配、通知转发、`thread/start`/`turn/start`/`thread/list`/`thread/read`/`thread/resume`，以及命令审批回调和持久线程失效重试；真实兼容性仍待 sidecar 回归。
+- 建立 mock sidecar、固定上游 schema 检查、协议冒烟入口、启动检查、Vite/Electron 构建和 Playwright UI 验证。
+- 建立 OpenAI Responses 风格 SSE 测试网关和内存账本，覆盖套餐优先抵扣、超额额度、余额不足、网关拒绝和流式响应。
+- 完成 Renderer 工作区和 Prompt launcher 交互，验证桌面、窄窗口和工具面板布局；未引入未授权的 React Bits Pro premium 源码。
+- 按参考图重做左侧会话管理：项目按 `cwd` 分组、支持展开/折叠和当前会话高亮；无 `cwd` 的持久线程单独归入“最近”，避免与项目列表重复。
+- 沿用 DeepSeek Harness 风格重做桌面端视觉皮肤：沉浸式深色画布、品牌标识、工作区侧栏、中心欢迎区和大尺寸 Prompt composer；保留现有会话、流式、差异和审批交互。
+- 修复未选择工作区时的会话归类：主进程持久化无工作区 thread 元数据；无当前工作区时历史记录统一显示在“最近”，不会按 sidecar 默认 cwd 误归入项目。
+- 补充工作区菜单的“选择文件夹 / 不使用工作区”操作；清空工作区会断开当前 thread，下一次请求必定创建无工作区会话。
+- 修正历史展示回归：没有当前工作区时仍展示已有项目分组，仅未分配 thread 进入“最近”；加入用户提供的 `brand-favicon.png`，产品名切换为 Codex Harness，并恢复无边框窗口右上角控制键。
+- 调整消息布局与桌面分区：用户消息右对齐、AI 消息左对齐且移除头像；标题栏、侧栏和主工作区独立分区，项目/工作区图标改用 `lucide-react`，长消息限制在消息列内换行。
+- 完成 Codex Harness 首屏细节：加号打开“添加 / 文件和文件夹 / 目标 / 计划模式”菜单；取消侧栏 HARNESS 白底强调；项目会话默认显示前三条并提供“展开显示 / 收起显示”；收紧侧栏保留统一白色 Lucide 文件夹图标。
+- 细化项目侧栏：项目文件夹固定使用图二的 `FolderOpen` 图标；项目无当前工作区时启动默认展开第一项，有当前工作区时默认展开当前项；保留其余会话并用“展开显示”访问；侧栏分割线和内边距按视觉稿收窄。
+- 项目列表默认展开全部项目，每个项目展示前三条会话，超出部分继续通过“展开显示”查看；项目名称与路径保持单行省略，悬停项目时提供新建会话按钮。
+- 项目侧栏按最新视觉稿移除存储路径，项目名称超出可用宽度时直接在右侧边界裁切，不添加省略号。
+- 恢复左侧项目列表垂直滚动条；项目名称改为右侧渐隐效果，避免使用硬截断或省略号。
+- 将项目新建按钮改为项目行容器内的右侧定位操作，避免被项目名称或侧栏边界裁切；默认侧栏宽度使用响应式 `clamp()`，拖动后才应用用户自定义宽度。
+- 项目新建会话操作改为项目行悬停或键盘聚焦时淡入的右侧覆盖按钮，隐藏时不占固定布局空间；点击后复用当前项目路径创建会话。
+- 修复项目组被长会话标题撑宽导致新建按钮定位到侧栏外的问题；项目列表、项目组和会话区补充 `min-width: 0` 约束。
+- 新建会话按钮使用紧凑的图标操作样式，悬停时提供独立反馈；项目行悬停不再显示存储路径 tooltip。
 
 ## 尚未完成
 
-- 真实 Codex App Server sidecar 的 Windows/macOS 构建产物和安装包。
-- 真实上游 App Server 协议兼容性回归。
-- 后端 API、持久化模型网关和 GPT 供应商转发。
-- 持久化套餐额度和超额 token 计费账本。
-- 手机号/邮箱认证。
-- 微信支付和支付宝支付正式接入。
-- 管理后台。
-- Windows/macOS 代码签名、自动更新和回滚。
-- 上游同步 CI 和兼容性测试。
+- 用 Rust/cargo 构建固定 commit 的 Windows/macOS App Server sidecar，并完成 `electron-builder` 资源打包、安装包和签名。
+- 对真实 sidecar 回归 initialize/initialized、流式事件、文件修改、命令审批、取消、线程恢复和版本兼容性。
+- 修正并验证桥接报文符合上游 JSONL 协议：不发送 `jsonrpc: "2.0"`，无参数请求显式发送 `params: {}`。
+- 将测试网关和内存账本替换为服务端持久化 API，补齐 GPT 供应商转发、用量采集、认证、套餐、超额计费、微信/支付宝回调和管理后台。
+- 完成 Windows/macOS 自动更新、回滚、上游同步 CI 和跨平台发布验收。
 
 ## 下一步
 
-1. 在具备 Rust 工具链的 Windows/macOS 构建机运行 `npm run build:sidecar`，把真实 `codex` sidecar 放入资源目录。
-2. 使用真实 App Server 协议完成 initialize、流式事件、文件修改和命令审批兼容性回归。
-3. 把测试网关和内存账本替换为服务端持久化 API，再接入登录和测试订单。
+1. 在具备 Rust 工具链的构建机运行 `npm run build:sidecar`，将真实二进制放入桌面端资源目录。
+2. 移除桥接请求中的 `jsonrpc` 字段，运行 `npm run protocol-schema-check`、`npm run protocol-smoke` 和真实 App Server 回归。
+3. 按服务端账本优先的规则设计持久化模型网关、认证和订单回调，再替换当前测试实现。
 
 ## 当前阻塞或待确认
 
-- 套餐额度的内部单位：金额、token 数量或点数。
-- 套餐额度有效期和过期规则。
-- 超额 token 是否允许欠费。
-- 首期 GPT 模型清单和是否允许客户端切换模型。
-- 官网更新策略、安装包签名证书和上游更新频率。
+- 当前环境没有 `cargo`，无法生成真实 sidecar。
+- 套餐额度单位、有效期、超额欠费策略和首期 GPT 模型清单仍未确定。
+- 官网更新策略、安装包签名证书和上游更新频率仍未确定。
 
 ## 验证记录
 
-- 项目骨架检查：已完成。
-- Codex 源码克隆：已完成。
-- 桌面端构建：`npm run build:all` 通过（TypeScript + Vite renderer）。
-- UI 验证：Playwright 截图检查桌面（1180x780）、移动（390x844）和工具面板状态；确认无布局溢出或遮挡。
-- App Server 启动：mock sidecar JSON-RPC initialize 握手通过；真实 sidecar 未构建（当前环境没有 cargo）。
-- sidecar 构建：已执行 `npm run build:sidecar`，按预期因当前环境缺少 `cargo` 失败；未伪造编译结果。
-- 上游协议检查：`npm run protocol-schema-check` 通过；`npm run protocol-smoke` 在无真实 binary 时明确跳过。
-- 持久历史协议：已按固定上游 schema 确认 `thread/start.ephemeral=false`、`thread/list`、`thread/read.includeTurns` 和 `thread/resume` 字段。
-- `ai-chat-1-demo` 独立构建：`npm run build` 通过；项目构建和 `npm test` 通过（4 tests）。
-- 后端模型网关：健康检查和一次 SSE Responses 流式请求通过。
-- 支付流程：未开始。
-- 自动化测试：`npm test` 通过，2 个测试文件、4 个测试（套餐优先抵扣、余额不足、SSE 流式请求和网关拒绝）。
+- `npm run build:all`：通过。
+- `npm test`：通过，2 个测试文件、4 个测试，覆盖账本和测试网关。
+- `npm run startup-check`：通过，包含桌面/服务构建产物检查和 mock sidecar 握手。
+- `npm run protocol-schema-check`：通过，覆盖 Phase 0 所需方法。
+- `npm run protocol-smoke`：在没有真实 sidecar 时明确跳过，未伪造通过结果。
+- `npm run build:sidecar`：按预期因缺少 `cargo` 失败，未伪造编译结果。
+- Playwright UI 截图：已检查 1180x780、390x844 和工具面板状态，无布局溢出或遮挡。
+- Playwright 侧栏交互：已验证项目展开/折叠、项目线程分组和“最近”未选择项目会话筛选；窄屏下品牌、新对话和列表无重叠。
+- Playwright UI 截图：已检查 Harness 风格桌面布局及 390x844 窄屏布局，移动端侧栏与工作区共享视口，欢迎标题和输入框首屏可见。
+- `npm run build:all`、`npm test`：通过；4 个测试全部通过。
+- `npm run startup-check`：通过；构建产物包含品牌 favicon，mock sidecar 握手正常。
+- Playwright UI 截图：已检查 1180x780 分区布局，标题栏窗口控制、Lucide 图标和首屏 composer 均可见。
+- Playwright UI：已验证 Codex Harness 标题、加号菜单弹层不溢出输入区；`npm run startup-check` 通过。
+- `npm run build:all`、`npm test`：通过；默认项目展开规则和统一文件夹图标已编译验证。
+- `npm run build:all`、`npm test`、`npm run startup-check`：通过；项目行新建会话按钮的悬停/聚焦显示规则已编译验证。
+- Electron 真实窗口验证：悬停项目行后 `.project-new-chat` 计算样式为 `opacity: 1`、`pointer-events: auto`，按钮矩形位于项目行右侧可视区域。
 
 ## 更新规则
 

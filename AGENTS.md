@@ -30,6 +30,15 @@
 - 分发：官网下载安装。
 - 上游 Codex 当前固定版本：`25a6e31`。
 
+## 开发参考与实现优先级
+
+- 外部开发日志、示例工程和文章只用于借鉴实现顺序、故障经验和验收方法；不作为协议或安全规范的来源。
+- App Server 协议以 `vendor/codex` 固定 commit `25a6e31` 的 schema、源码和回归测试为准；发现外部资料与上游不一致时，以上游为准并记录原因。
+- 上游 App Server 使用 JSONL 的 JSON-RPC 风格报文，但不是完整 JSON-RPC 2.0：不要发送或要求 `jsonrpc: "2.0"` 字段；请求必须带 `params` 对象（无参数时使用 `{}`），并严格执行 `initialize` → `initialized` 握手。
+- Tauri/Rust 示例中的桥接职责可以迁移到 Electron Main；Renderer 只能通过 preload 白名单接收事件、发起请求和回传审批。
+- 发布版不得依赖全局安装的 Codex CLI、PATH 扫描或用户本机的 Node.js/Rust/Python；真实 sidecar 必须由固定上游 commit 构建并随安装包分发。`CODEX_SIDECAR_PATH` 仅用于开发和协议验证。
+- 模型供应商配置、API Key、余额扣费和支付结果不从外部客户端流程照搬，必须服从本项目的后端网关、服务端账本和回调验签约束。
+
 ## 已安装项目技能
 
 - `.agents/skills/security-best-practices`：认证、密钥、支付、API 和桌面安全检查。
@@ -39,7 +48,7 @@
 
 ## 安装、开发、检查和测试
 
-当前根项目仍处于 Phase 0 骨架阶段，桌面端和服务端尚未生成可运行的包管理工程；不要假装执行不存在的命令。
+当前根项目处于 Phase 0 技术验证阶段，Electron、测试网关、基础账本和协议检查工程已经存在；生产级后端、真实 sidecar 构建和安装发布链路仍在后续阶段。只执行仓库中已经定义并实际存在的命令。
 
 ### 查看状态
 
@@ -69,6 +78,23 @@ cargo test --manifest-path vendor/codex/codex-rs/Cargo.toml -p codex-app-server
 ```
 
 根项目的桌面端、API、网关和计费命令，必须在对应工程创建后补充到本文件；命令不能只写在聊天里。
+
+### Phase 0 骨架命令
+
+在已安装 Node.js 18+ 的开发环境中执行：
+
+```powershell
+npm install
+npm run typecheck       # TypeScript 编译 + renderer 打包
+npm test                # billing/model-gateway 自动化测试
+npm run startup-check   # 构建产物、mock sidecar 握手和启动检查
+npm run protocol-smoke  # 若存在真实 sidecar，验证上游 initialize/initialized 协议
+npm run protocol-schema-check # 校验固定上游 schema 仍包含 Phase 0 所需方法
+npm run build:sidecar   # 需要 Rust/cargo；构建固定上游 25a6e31 的 codex 二进制
+npm run dev             # 启动 Electron 技术验证客户端
+```
+
+`scripts/startup-check.mjs` 使用 `scripts/mock-app-server.js` 做无真实二进制的启动验证；`npm run dev` 需要 `CODEX_SIDECAR_PATH`、开发资源目录或已打包的真实 sidecar。发布包必须先运行 `npm run build:sidecar` 并通过资源目录提供真实 sidecar，不得回退到全局 CLI。
 
 ## 架构约束与代码规范
 
