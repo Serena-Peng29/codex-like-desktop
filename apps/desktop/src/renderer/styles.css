@@ -112,6 +112,26 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .assistant-message .message-content { padding: .1rem 0; }
 .message-footer { display: flex; align-items: center; gap: .38rem; margin-top: .75rem; color: #77756f; font-size: .68rem; }
 .success-mark { color: #62b7a6; font-weight: 700; }
+.assistant-copy { margin: 0; }
+.stream-caret { display: inline-block; width: .42rem; height: 1rem; margin-left: .2rem; vertical-align: -.12rem; border-radius: .08rem; background: #75b8e8; animation: caret-blink 900ms steps(2, jump-none) infinite; }
+.message-reasoning, .message-tool { margin: 0 0 .7rem; border: 1px solid #343b42; border-radius: .55rem; background: #171c20; }
+.reasoning-toggle { display: flex; align-items: center; gap: .45rem; width: 100%; padding: .55rem .7rem; color: #a8b4bd; background: transparent; text-align: left; font-size: .72rem; }
+.reasoning-toggle:hover { color: #e2edf4; background: #20272c; }
+.reasoning-toggle > span:first-child { width: .7rem; color: #76b5df; font-size: 1rem; }
+.reasoning-list { display: grid; gap: .45rem; margin: 0; padding: .1rem .8rem .7rem 1rem; list-style: none; }
+.reasoning-list li { display: flex; align-items: flex-start; gap: .55rem; color: #b8c1c7; font-size: .72rem; line-height: 1.5; }
+.reasoning-list li > span { display: grid; place-items: center; width: 1.1rem; height: 1.1rem; flex: 0 0 1.1rem; border-radius: 50%; color: #8ac5ec; background: #22313b; font-size: .62rem; }
+.reasoning-list p { margin: 0; }
+.message-tool { padding: .65rem .7rem; }
+.tool-heading { display: flex; align-items: center; gap: .45rem; color: #d5e2e9; font-size: .75rem; }
+.tool-spinner, .tool-check { width: 1rem; color: #78b6e4; text-align: center; }
+.tool-check { color: #69b9a4; }
+.tool-status { margin-left: auto; padding: .18rem .4rem; border-radius: .25rem; font-size: .63rem; }
+.tool-status.running { color: #8bc3eb; background: #203441; }
+.tool-status.done { color: #78c8b3; background: #1b332d; }
+.tool-detail { display: grid; gap: .3rem; margin-top: .5rem; color: #8998a2; font-family: "JetBrains Mono", Consolas, monospace; font-size: .65rem; line-height: 1.45; overflow-wrap: anywhere; }
+.tool-detail span { color: #586873; }
+@keyframes caret-blink { 50% { opacity: .2; } }
 .activity-strip { display: flex; align-items: center; gap: .6rem; margin: .2rem 0 1rem 2.8rem; padding: .65rem .8rem; border: 1px solid #33485d; border-radius: .5rem; color: #aaa9a3; background: #17212a; font-size: .76rem; }
 .activity-strip > span:nth-child(1) { color: #73a9de; }
 .activity-strip button { margin-left: auto; padding: .25rem .55rem; border-radius: .35rem; color: #80b4eb; background: transparent; font-size: .72rem; }

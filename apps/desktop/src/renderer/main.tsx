@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
@@ -7,6 +7,8 @@ type Diff = { path: string; before: string; after: string; status: string };
 type Approval = { approvalId: string; command: string; cwd: string; reason: string; source?: "local" | "app-server"; requestId?: number | string };
 type Permission = "ask" | "auto" | "full";
 type HistoryEntry = { id: string; preview?: string; name?: string | null; cwd?: string; updatedAt?: number; createdAt?: number; ephemeral?: boolean; status?: unknown };
+type ToolCall = { id: string; name: string; args: unknown; result: string; status: "running" | "done" };
+type ChatMessage = { id: string; role: "user" | "assistant"; content: string; reasoning?: string[]; tool?: ToolCall | null; streaming?: boolean; usage?: Record<string, number> };
 
 const modelOptions = ["5.6 Sol", "5.6 Terra", "5.6 Luna", "5.5", "5.2"];
 const intensityOptions = ["低", "中", "高"];
@@ -47,6 +49,51 @@ function latestThreadMessages(payload: { thread?: { turns?: Array<{ items?: Arra
   return entries;
 }
 
+function entriesToChatMessages(entries: Array<{ role: "user" | "assistant"; text: string }>): ChatMessage[] {
+  return entries.map((entry, index) => ({ id: `history-${index}-${entry.role}`, role: entry.role, content: entry.text, reasoning: [], tool: null, streaming: false }));
+}
+
+function toolFromItem(item: unknown): ToolCall | null {
+  if (!item || typeof item !== "object") return null;
+  const value = item as Record<string, unknown>;
+  const id = typeof value.id === "string" ? value.id : `tool-${Date.now()}`;
+  if (value.type === "commandExecution") return { id, name: "exec_command", args: { command: value.command, cwd: value.cwd }, result: "", status: "running" };
+  if (value.type === "mcpToolCall" || value.type === "dynamicToolCall") return { id, name: typeof value.tool === "string" ? value.tool : String(value.type), args: value.arguments ?? {}, result: "", status: "running" };
+  if (value.type === "webSearch") return { id, name: "web_search", args: { query: value.query ?? value.searchQuery ?? "" }, result: "", status: "running" };
+  if (value.type === "fileChange") return { id, name: "file_change", args: { changes: value.changes ?? [] }, result: "", status: "running" };
+  if (value.type === "collabAgentToolCall") return { id, name: typeof value.tool === "string" ? value.tool : "sub_agent", args: { prompt: value.prompt ?? "" }, result: "", status: "running" };
+  return null;
+}
+
+function toolFromRequest(request: { requestId: number | string; method: string; params: Record<string, unknown> }): ToolCall | null {
+  if (request.method === "item/commandExecution/requestApproval") return { id: String(request.requestId), name: "exec_command", args: { command: request.params.command ?? "", cwd: request.params.cwd ?? "" }, result: "等待用户批准", status: "running" };
+  if (request.method === "item/fileChange/requestApproval") return { id: String(request.requestId), name: "file_change", args: request.params, result: "等待用户批准", status: "running" };
+  return null;
+}
+
+function displayValue(value: unknown) {
+  if (value == null) return "";
+  return typeof value === "string" ? value : JSON.stringify(value);
+}
+
+function ReasoningBlock({ steps }: { steps?: string[] }) {
+  const [open, setOpen] = useState(false);
+  if (!steps?.length) return null;
+  return <div className="message-reasoning">
+    <button type="button" className="reasoning-toggle" onClick={() => setOpen((value) => !value)} aria-expanded={open}><span>{open ? "⌄" : "›"}</span><span>推理过程 · {steps.length} 步</span></button>
+    {open && <ol className="reasoning-list">{steps.map((step, index) => <li key={`${index}-${step}`}><span>{index + 1}</span><p>{step}</p></li>)}</ol>}
+  </div>;
+}
+
+function ToolCallCard({ tool }: { tool?: ToolCall | null }) {
+  if (!tool) return null;
+  const running = tool.status === "running";
+  return <div className="message-tool">
+    <div className="tool-heading"><span className={running ? "tool-spinner" : "tool-check"}>{running ? "◌" : "✓"}</span><strong>{tool.name}</strong><span className={`tool-status ${running ? "running" : "done"}`}>{running ? "运行中" : "已完成"}</span></div>
+    <div className="tool-detail"><div><span>args:</span> {displayValue(tool.args)}</div>{tool.result && <div><span>result:</span> {tool.result}</div>}</div>
+  </div>;
+}
+
 function App() {
   const [state, setState] = useState<{
     projectPath: string | null;
@@ -57,9 +104,7 @@ function App() {
     gatewayMode: "remote" | "local";
   }>();
   const [input, setInput] = useState("");
-  const [submittedInput, setSubmittedInput] = useState("");
-  const [output, setOutput] = useState("");
-  const [usage, setUsage] = useState<Record<string, number>>({});
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [model, setModel] = useState("5.6 Sol");
   const [intensity, setIntensity] = useState("中");
   const [permission, setPermission] = useState<Permission>("ask");
@@ -76,6 +121,13 @@ function App() {
   const [errorMessage, setErrorMessage] = useState("");
   const [tool, setTool] = useState<Tool>(null);
   const [sending, setSending] = useState(false);
+  const activeAssistantId = useRef<string | null>(null);
+  const conversationScrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const element = conversationScrollRef.current;
+    if (element) element.scrollTop = element.scrollHeight;
+  }, [messages]);
 
   useEffect(() => {
     if (!window.desktop) return;
@@ -83,11 +135,8 @@ function App() {
       setState(nextState);
       if (!nextState.activeThreadId) return;
       try {
-        const messages = latestThreadMessages(await window.desktop.loadThread(nextState.activeThreadId));
-        const lastUser = [...messages].reverse().find((message) => message.role === "user");
-        const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
-        if (lastUser) setSubmittedInput(lastUser.text);
-        if (lastAssistant) setOutput(lastAssistant.text);
+        const entries = latestThreadMessages(await window.desktop.loadThread(nextState.activeThreadId));
+        if (entries.length) setMessages(entriesToChatMessages(entries));
       } catch { /* a stale persisted thread should not prevent launch */ }
     });
   }, []);
@@ -112,7 +161,46 @@ function App() {
     if (!window.desktop?.onMessageDelta) return;
     return window.desktop.onMessageDelta((event) => {
       if (typeof event.delta !== "string") return;
-      setOutput((current) => `${current}${event.delta}`);
+      const id = activeAssistantId.current;
+      if (!id) return;
+      setMessages((current) => current.map((message) => message.id === id ? { ...message, content: `${message.content}${event.delta}`, streaming: true } : message));
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!window.desktop?.onAppServerEvent) return;
+    return window.desktop.onAppServerEvent((event) => {
+      const id = activeAssistantId.current;
+      if (!id) return;
+      const params = event.params ?? {};
+      if (event.method === "item/reasoning/summaryTextDelta" || event.method === "item/reasoning/textDelta") {
+        const index = Number.isInteger(params.summaryIndex) ? Number(params.summaryIndex) : (Number.isInteger(params.contentIndex) ? Number(params.contentIndex) : 0);
+        setMessages((current) => current.map((message) => {
+          if (message.id !== id) return message;
+          const reasoning = [...(message.reasoning ?? [])];
+          reasoning[index] = `${reasoning[index] ?? ""}${typeof params.delta === "string" ? params.delta : ""}`;
+          return { ...message, reasoning };
+        }));
+      } else if (event.method === "item/started") {
+        const nextTool = toolFromItem(params.item);
+        if (nextTool) setMessages((current) => current.map((message) => message.id === id ? { ...message, tool: nextTool } : message));
+      } else if (event.method === "item/commandExecution/outputDelta") {
+        const delta = typeof params.delta === "string" ? params.delta : "";
+        setMessages((current) => current.map((message) => message.id === id && message.tool ? { ...message, tool: { ...message.tool, result: `${message.tool.result}${delta}` } } : message));
+      } else if (event.method === "item/completed") {
+        const completed = toolFromItem(params.item);
+        if (completed) setMessages((current) => current.map((message) => message.id === id ? { ...message, tool: { ...completed, status: "done", result: displayValue((params.item as Record<string, unknown> | undefined)?.aggregatedOutput ?? (params.item as Record<string, unknown> | undefined)?.result ?? completed.result) } } : message));
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!window.desktop?.onAppServerRequest) return;
+    return window.desktop.onAppServerRequest((request) => {
+      const id = activeAssistantId.current;
+      const nextTool = toolFromRequest(request);
+      if (!id || !nextTool) return;
+      setMessages((current) => current.map((message) => message.id === id ? { ...message, tool: nextTool } : message));
     });
   }, []);
 
@@ -124,12 +212,8 @@ function App() {
 
   async function loadHistory(threadId: string) {
     try {
-      const messages = latestThreadMessages(await window.desktop.loadThread(threadId));
-      const lastUser = [...messages].reverse().find((message) => message.role === "user");
-      const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
-      setSubmittedInput(lastUser?.text ?? "");
-      setOutput(lastAssistant?.text ?? "");
-      setUsage({});
+      const entries = latestThreadMessages(await window.desktop.loadThread(threadId));
+      setMessages(entriesToChatMessages(entries));
       setState(await window.desktop.state());
       setNotice("已恢复本地会话");
     } catch (error) {
@@ -149,24 +233,25 @@ function App() {
       setErrorMessage("桌面通信未就绪，请从 Electron 客户端启动");
       return;
     }
-    setSubmittedInput(message);
     setRecentPrompts((current) => [message, ...current.filter((prompt) => prompt !== message)].slice(0, 5));
-    setOutput("");
-    setUsage({});
+    const assistantId = `message-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    activeAssistantId.current = assistantId;
+    setMessages((current) => [...current, { id: `user-${assistantId}`, role: "user", content: message }, { id: assistantId, role: "assistant", content: "", reasoning: [], tool: null, streaming: true }]);
     setNotice("正在流式请求 GPT...");
     setErrorMessage("");
     setSending(true);
     try {
       const result = await window.desktop.stream(message, { effort: intensity === "低" ? "low" : intensity === "高" ? "high" : "medium" });
-      setOutput(result.output);
-      setUsage(result.usage);
+      setMessages((current) => current.map((item) => item.id === assistantId ? { ...item, content: item.content || result.output, usage: result.usage, streaming: false } : item));
       setState(await window.desktop.state());
       setNotice("请求完成，账本已完成本次扣费");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      setMessages((current) => current.map((item) => item.id === assistantId ? { ...item, content: `请求失败：${message}`, streaming: false } : item));
       setNotice(message);
       setErrorMessage(message);
     } finally {
+      activeAssistantId.current = null;
       setSending(false);
     }
   }
@@ -234,7 +319,7 @@ function App() {
     }
   }
 
-  const hasConversation = Boolean(submittedInput || output);
+  const hasConversation = messages.length > 0;
 
   return (
     <div className="app-window">
@@ -250,7 +335,7 @@ function App() {
           <div className="sidebar-actions"><button className="icon-button" title="搜索" aria-label="搜索">⌕</button></div>
         </div>
 
-        <button className="new-chat-button" onClick={() => { void window.desktop?.newThread(); setSubmittedInput(""); setOutput(""); setDiff(undefined); setPendingApproval(undefined); setNotice(""); }}><span className="new-chat-icon">↗</span> 新对话</button>
+        <button className="new-chat-button" onClick={() => { void window.desktop?.newThread(); setMessages([]); activeAssistantId.current = null; setDiff(undefined); setPendingApproval(undefined); setNotice(""); }}><span className="new-chat-icon">↗</span> 新对话</button>
 
         <div className="sidebar-scroll">
           <div className="sidebar-section">
@@ -280,7 +365,7 @@ function App() {
 
         <div className="workspace-body">
           <main className="conversation-pane">
-            <div className="conversation-scroll">
+            <div className="conversation-scroll" ref={conversationScrollRef}>
               <div className="message-column">
                 {!hasConversation && <div className="welcome-block">
                   <div className="welcome-icon">W</div>
@@ -294,8 +379,7 @@ function App() {
                     {recentPrompts.length ? recentPrompts.map((prompt) => <button className="recent-prompt" key={`recent-${prompt}`} onClick={() => setInput(prompt)}><span className="recent-icon">◷</span><span>{prompt}</span><span className="recent-arrow" aria-hidden="true">↗</span></button>) : <div className="recent-empty">发送过的提示会出现在这里</div>}
                   </div>
                 </div>}
-                {submittedInput && <div className="message user-message"><div className="message-avatar user-avatar">你</div><div className="message-content"><div className="message-meta"><strong>你</strong><span>刚刚</span></div><p>{submittedInput}</p></div></div>}
-                {output && <div className="message assistant-message"><div className="message-avatar agent-avatar">W</div><div className="message-content"><div className="message-meta"><strong>Way2AGI Agent</strong><span className="model-pill">GPT</span></div><p>{output}</p><div className="message-footer"><span className="success-mark">✓</span> 已完成 <span>·</span> {usage.totalTokens ? `${usage.totalTokens} tokens` : "流式输出"}</div></div></div>}
+                {messages.map((message) => message.role === "user" ? <div className="message user-message" key={message.id}><div className="message-avatar user-avatar">你</div><div className="message-content"><div className="message-meta"><strong>你</strong><span>刚刚</span></div><p>{message.content}</p></div></div> : <div className="message assistant-message" key={message.id}><div className="message-avatar agent-avatar">W</div><div className="message-content"><div className="message-meta"><strong>Way2AGI Agent</strong><span className="model-pill">GPT</span></div><ReasoningBlock steps={message.reasoning} /><ToolCallCard tool={message.tool} /><p className="assistant-copy">{message.content}{message.streaming && <span className="stream-caret" aria-hidden="true" />}</p><div className="message-footer"><span className="success-mark">{message.streaming ? "◌" : "✓"}</span> {message.streaming ? "生成中" : "已完成"}<span>·</span> {message.usage?.totalTokens ? `${message.usage.totalTokens} tokens` : "流式输出"}</div></div></div>)}
                 {(diff || pendingApproval) && <div className="activity-strip"><span>◈</span><span>{diff ? "有一项文件差异待确认" : "有一条命令等待审批"}</span><button onClick={() => setTool(diff ? "diff" : "approval")}>查看</button></div>}
               </div>
             </div>

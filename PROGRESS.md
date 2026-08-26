@@ -37,6 +37,7 @@
 - 将新线程从 `ephemeral: true` 改为 `ephemeral: false`，通过 `thread/list`、`thread/read` 和 `thread/resume` 接入 Codex 本地 rollout 历史。
 - 保存最后项目与线程到 Electron userData，启动时恢复并在侧栏展示本地会话记录；新增新对话时显式创建新线程。
 - 将 `ai-chat-1-demo` 的 `AIChat1.jsx` 从 `buildAssistantReply`/延时模拟切换为桌面端真实 App Server 流事件：文本增量、推理摘要、工具生命周期、命令输出增量和审批请求；保留原有 Composer 输入框与自动滚动/折叠推理/工具卡片展示。
+- 将上述 AI Chat 交互正式迁移到桌面 Renderer：会话改为多消息列表，支持用户/助手气泡、真实流式光标、可折叠推理步骤、工具调用卡片和工具输出增量；原有输入框保持不变。
 
 ## 尚未完成
 
