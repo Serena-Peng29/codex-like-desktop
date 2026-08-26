@@ -1,8 +1,14 @@
 # 技术架构
 
 ```text
-桌面 UI
-  -> 内置 Codex App Server
+Electron Main Process
+  -> 启动和管理 Codex App Server sidecar
+  -> 通过 preload 白名单 IPC 管理 Renderer
+
+Electron Renderer（React + TypeScript）
+  -> 本地 JSON-RPC / WebSocket / stdio
+  -> Codex App Server sidecar
+  -> HTTPS
   -> 产品后端 API
   -> OpenAI 兼容模型网关
   -> GPT 模型 API
@@ -10,11 +16,20 @@
 
 ## 组件职责
 
-- `apps/desktop`：项目选择、对话、流式输出、差异预览、命令审批、登录和充值界面。
+- `apps/desktop`：Electron 主进程、React Renderer、项目选择、对话、流式输出、差异预览、命令审批、登录和充值界面。
 - `services/api`：认证、账户、模型目录和客户端会话 API。
 - `services/model-gateway`：模型路由、供应商 API Key、重试、限流和流式转发。
 - `services/billing`：套餐额度、超额 token、余额账本、支付订单和退款规则。
 - `vendor/codex`：固定版本的上游 Codex 开源依赖，不直接作为用户安装的 CLI。
+
+## Electron 安全约束
+
+- 主进程负责启动、停止和监控 App Server sidecar。
+- Renderer 必须关闭 `nodeIntegration` 并开启 `contextIsolation`。
+- Renderer 只能通过 `preload` 使用白名单 IPC。
+- Renderer 不得直接调用 shell、文件系统或支付密钥。
+- App Server sidecar 通过 `extraResources` 或等效方式随安装包分发。
+- Windows/macOS 安装包和更新包必须签名。
 
 ## 运行时原则
 

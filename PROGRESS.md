@@ -5,6 +5,7 @@
 - 日期：2026-08-26
 - 阶段：Phase 0 准备阶段
 - 状态：项目骨架已建立，尚未开始实现桌面端和后端服务
+- 桌面技术栈已确定为 Electron + React + TypeScript。
 
 ## 已完成
 
@@ -30,7 +31,7 @@
 
 ## 下一步
 
-1. 选择并初始化桌面端框架，优先评估 Tauri。
+1. 初始化 Electron + React + TypeScript 桌面端。
 2. 编译随包运行的 Codex App Server sidecar。
 3. 完成桌面端启动 sidecar、选择本地项目和建立 JSON-RPC 连接。
 4. 实现一个 OpenAI 兼容的测试模型网关。

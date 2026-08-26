@@ -17,7 +17,7 @@
 
 | 目录 | 用途 |
 | --- | --- |
-| `apps/desktop` | Tauri/Electron 桌面客户端 |
+| `apps/desktop` | Electron + React + TypeScript 桌面客户端 |
 | `apps/admin` | 运营和计费管理后台 |
 | `services/api` | 认证、账户、项目和客户端 API |
 | `services/model-gateway` | OpenAI 兼容模型网关 |
@@ -36,6 +36,14 @@
 3. 余额和扣费由服务端账本最终裁定。
 4. 上游 Codex 更新必须经过兼容性测试后再进入产品版本。
 5. 产品使用自有品牌，不宣称为 OpenAI 官方客户端。
+
+## 桌面技术栈
+
+- Electron 主进程负责窗口、App Server sidecar 生命周期和安全 IPC。
+- React + TypeScript Renderer 负责桌面 UI。
+- `preload` 只暴露白名单 IPC，不开启 `nodeIntegration`。
+- `electron-builder` 负责 Windows/macOS 安装包。
+- `electron-updater` 负责签名更新和版本回滚策略。
 
 ## 下一步
 

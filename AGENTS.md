@@ -4,7 +4,7 @@
 
 ## 目录路由
 
-- `apps/desktop`：Windows/macOS 桌面端，负责 UI、项目选择、对话、差异和审批。
+- `apps/desktop`：Electron + React + TypeScript Windows/macOS 桌面端，负责 UI、项目选择、对话、差异和审批。
 - `apps/admin`：运营后台，负责用户、套餐、订单、价格和账本查询。
 - `services/api`：认证、账户、模型目录和客户端 API。
 - `services/model-gateway`：OpenAI 兼容 Responses API、GPT 路由、限流、重试和用量采集。
@@ -65,6 +65,8 @@ cargo test --manifest-path vendor/codex/codex-rs/Cargo.toml -p codex-app-server
 ## 架构约束与代码规范
 
 - 桌面端必须内置匹配版本的 App Server，不能要求用户另装 Codex CLI、Node.js、Rust 或 Python。
+- 桌面端默认使用 Electron + React + TypeScript；使用 `electron-builder` 打包，使用 `electron-updater` 处理更新。
+- Electron 必须关闭 `nodeIntegration`、开启 `contextIsolation`，Renderer 只能通过 preload 白名单 IPC。
 - 模型供应商长期 API Key 只能存在后端密钥系统，不能进入桌面包、日志或客户端配置。
 - 所有模型请求必须经过后端网关；客户端不能绕过网关直连供应商。
 - 余额、套餐额度、超额 token 和退款以服务端账本为准；客户端金额只用于展示。
