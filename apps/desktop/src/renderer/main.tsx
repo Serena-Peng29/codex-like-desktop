@@ -6,6 +6,7 @@ type Tool = "diff" | "approval" | null;
 type Diff = { path: string; before: string; after: string; status: string };
 type Approval = { approvalId: string; command: string; cwd: string; reason: string; source?: "local" | "app-server"; requestId?: number | string };
 type Permission = "ask" | "auto" | "full";
+type HistoryEntry = { id: string; preview?: string; name?: string | null; cwd?: string; updatedAt?: number; createdAt?: number; ephemeral?: boolean; status?: unknown };
 
 const modelOptions = ["5.6 Sol", "5.6 Terra", "5.6 Luna", "5.5", "5.2"];
 const intensityOptions = ["低", "中", "高"];
@@ -25,9 +26,32 @@ function projectName(path: string | null | undefined) {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
+function textFromThreadItem(item: Record<string, unknown>) {
+  if (item.type === "userMessage") {
+    const content = Array.isArray(item.content) ? item.content : [];
+    return content.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && (entry as Record<string, unknown>).type === "text"))
+      .map((entry) => typeof entry.text === "string" ? entry.text : "").join("");
+  }
+  if (item.type === "agentMessage") return typeof item.text === "string" ? item.text : "";
+  return "";
+}
+
+function latestThreadMessages(payload: { thread?: { turns?: Array<{ items?: Array<Record<string, unknown>> }> } }) {
+  const entries: Array<{ role: "user" | "assistant"; text: string }> = [];
+  for (const turn of payload.thread?.turns ?? []) {
+    for (const item of turn.items ?? []) {
+      const text = textFromThreadItem(item);
+      if (text) entries.push({ role: item.type === "userMessage" ? "user" : "assistant", text });
+    }
+  }
+  return entries;
+}
+
 function App() {
   const [state, setState] = useState<{
     projectPath: string | null;
+    activeThreadId: string | null;
+    history: HistoryEntry[];
     sidecar: string;
     gateway: string;
     gatewayMode: "remote" | "local";
@@ -55,7 +79,17 @@ function App() {
 
   useEffect(() => {
     if (!window.desktop) return;
-    void window.desktop.state().then(setState);
+    void window.desktop.state().then(async (nextState) => {
+      setState(nextState);
+      if (!nextState.activeThreadId) return;
+      try {
+        const messages = latestThreadMessages(await window.desktop.loadThread(nextState.activeThreadId));
+        const lastUser = [...messages].reverse().find((message) => message.role === "user");
+        const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+        if (lastUser) setSubmittedInput(lastUser.text);
+        if (lastAssistant) setOutput(lastAssistant.text);
+      } catch { /* a stale persisted thread should not prevent launch */ }
+    });
   }, []);
 
   useEffect(() => {
@@ -74,10 +108,33 @@ function App() {
     });
   }, []);
 
+  useEffect(() => {
+    if (!window.desktop?.onMessageDelta) return;
+    return window.desktop.onMessageDelta((event) => {
+      if (typeof event.delta !== "string") return;
+      setOutput((current) => `${current}${event.delta}`);
+    });
+  }, []);
+
   async function chooseProject() {
     const path = await window.desktop.chooseProject();
     setState(await window.desktop.state());
     if (path) setNotice(`已连接到 ${projectName(path)}`);
+  }
+
+  async function loadHistory(threadId: string) {
+    try {
+      const messages = latestThreadMessages(await window.desktop.loadThread(threadId));
+      const lastUser = [...messages].reverse().find((message) => message.role === "user");
+      const lastAssistant = [...messages].reverse().find((message) => message.role === "assistant");
+      setSubmittedInput(lastUser?.text ?? "");
+      setOutput(lastAssistant?.text ?? "");
+      setUsage({});
+      setState(await window.desktop.state());
+      setNotice("已恢复本地会话");
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    }
   }
 
   async function runChat() {
@@ -94,6 +151,8 @@ function App() {
     }
     setSubmittedInput(message);
     setRecentPrompts((current) => [message, ...current.filter((prompt) => prompt !== message)].slice(0, 5));
+    setOutput("");
+    setUsage({});
     setNotice("正在流式请求 GPT...");
     setErrorMessage("");
     setSending(true);
@@ -101,6 +160,7 @@ function App() {
       const result = await window.desktop.stream(message, { effort: intensity === "低" ? "low" : intensity === "高" ? "high" : "medium" });
       setOutput(result.output);
       setUsage(result.usage);
+      setState(await window.desktop.state());
       setNotice("请求完成，账本已完成本次扣费");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -168,7 +228,7 @@ function App() {
   }
 
   function handleComposerKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
       void runChat();
     }
@@ -190,7 +250,7 @@ function App() {
           <div className="sidebar-actions"><button className="icon-button" title="搜索" aria-label="搜索">⌕</button></div>
         </div>
 
-        <button className="new-chat-button" onClick={() => { setSubmittedInput(""); setOutput(""); setDiff(undefined); setPendingApproval(undefined); setNotice(""); }}><span className="new-chat-icon">↗</span> 新对话</button>
+        <button className="new-chat-button" onClick={() => { void window.desktop?.newThread(); setSubmittedInput(""); setOutput(""); setDiff(undefined); setPendingApproval(undefined); setNotice(""); }}><span className="new-chat-icon">↗</span> 新对话</button>
 
         <div className="sidebar-scroll">
           <div className="sidebar-section">
@@ -199,7 +259,7 @@ function App() {
               <span className="folder-icon">□</span>
               <span className="thread-copy"><strong>{projectName(state?.projectPath)}</strong><small>{state?.projectPath ?? "选择本地项目"}</small></span>
             </button>
-            {hasConversation && <button className="session-row" title="当前会话"><span className="session-status">◌</span><span className="thread-copy"><strong>本地编程任务</strong><small>刚刚更新</small></span></button>}
+            {state?.history?.map((entry) => <button className={`session-row ${entry.id === state.activeThreadId ? "active-session" : ""}`} title={entry.cwd ?? "本地会话"} key={entry.id} onClick={() => void loadHistory(entry.id)}><span className="session-status">◌</span><span className="thread-copy"><strong>{entry.name || entry.preview || "本地编程任务"}</strong><small>{entry.cwd || "未归档到项目"}</small></span></button>)}
           </div>
         </div>
 

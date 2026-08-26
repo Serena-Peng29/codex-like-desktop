@@ -32,6 +32,11 @@
 - 将 `chat:stream` 切换为真实 App Server `thread/start` + `turn/start` 临时会话，使用 `workspace-write` 沙箱和 `on-request` 审批策略；收集 `item/agentMessage/delta` 与 `turn/completed` 返回对话结果。
 - 修复发送按钮被 sidecar 状态永久禁用的问题：改为有输入即可发送、请求期间禁用，并对未选择项目或非 Electron 预览显示错误提示。
 - 修复 sidecar 启动路径：只启动真实 Codex App Server 二进制，不再从 Electron 进程拉起 mock 脚本。
+- 将消息发送快捷键改为 Enter，Shift+Enter 保留换行。
+- 允许未选择项目时创建真实持久 App Server 线程；有项目时仍使用项目工作区和审批沙箱。
+- 将新线程从 `ephemeral: true` 改为 `ephemeral: false`，通过 `thread/list`、`thread/read` 和 `thread/resume` 接入 Codex 本地 rollout 历史。
+- 保存最后项目与线程到 Electron userData，启动时恢复并在侧栏展示本地会话记录；新增新对话时显式创建新线程。
+- 将 `ai-chat-1-demo` 的 `AIChat1.jsx` 从 `buildAssistantReply`/延时模拟切换为桌面端真实 App Server 流事件：文本增量、推理摘要、工具生命周期、命令输出增量和审批请求；保留原有 Composer 输入框与自动滚动/折叠推理/工具卡片展示。
 
 ## 尚未完成
 
@@ -68,6 +73,8 @@
 - App Server 启动：mock sidecar JSON-RPC initialize 握手通过；真实 sidecar 未构建（当前环境没有 cargo）。
 - sidecar 构建：已执行 `npm run build:sidecar`，按预期因当前环境缺少 `cargo` 失败；未伪造编译结果。
 - 上游协议检查：`npm run protocol-schema-check` 通过；`npm run protocol-smoke` 在无真实 binary 时明确跳过。
+- 持久历史协议：已按固定上游 schema 确认 `thread/start.ephemeral=false`、`thread/list`、`thread/read.includeTurns` 和 `thread/resume` 字段。
+- `ai-chat-1-demo` 独立构建：`npm run build` 通过；项目构建和 `npm test` 通过（4 tests）。
 - 后端模型网关：健康检查和一次 SSE Responses 流式请求通过。
 - 支付流程：未开始。
 - 自动化测试：`npm test` 通过，2 个测试文件、4 个测试（套餐优先抵扣、余额不足、SSE 流式请求和网关拒绝）。
