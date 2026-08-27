@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, FilePenLine, FolderOpen, Lightbulb, MessageCircle, MessageCirclePlus, Minus, PanelLeft, Paperclip, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, FilePenLine, FileText, FolderOpen, FolderPlus, Lightbulb, List, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, Paperclip, Pencil, Pin, PinOff, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
 import "./styles.css";
 
 const brandFavicon = new URL("./brand-favicon.png", import.meta.url).href;
@@ -12,13 +12,25 @@ type Permission = "ask" | "auto" | "full";
 type HistoryEntry = { id: string; preview?: string; name?: string | null; cwd?: string; updatedAt?: number; createdAt?: number; ephemeral?: boolean; status?: unknown };
 type ToolCall = { id: string; sourceId?: string; name: string; args: unknown; result: string; status: "running" | "done" | "failed" };
 type FileChange = { path: string; kind?: unknown; diff: string };
-type UserImage = { path: string; name: string; preview?: string };
+type UserImage = { path: string; name: string; image?: boolean; preview?: string };
 type AssistantPart = { id: string; sourceId?: string; kind: "text" | "reasoning" | "tool"; text?: string; steps?: string[]; tool?: ToolCall; streaming?: boolean };
-type ChatMessage = { id: string; role: "user" | "assistant"; content: string; images?: UserImage[]; reasoning?: string[]; tool?: ToolCall | null; parts?: AssistantPart[]; streaming?: boolean; usage?: Record<string, number>; completedAt?: number };
+type ChatMessage = { id: string; role: "user" | "assistant"; content: string; images?: UserImage[]; files?: UserImage[]; reasoning?: string[]; tool?: ToolCall | null; parts?: AssistantPart[]; streaming?: boolean; usage?: Record<string, number>; completedAt?: number };
 type ProjectGroup = { key: string; path: string | null; name: string; entries: HistoryEntry[]; isCurrent: boolean };
+type ViewPrefs = { grouping: "workspace" | "flat"; sort: "manual" | "recent" };
 
 const modelOptions = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.2"];
 const intensityOptions = ["低", "中", "高"];
+const viewPrefsStorageKey = "codex-harness-view-prefs";
+
+function loadViewPrefs(): ViewPrefs {
+  try {
+    const value = JSON.parse(localStorage.getItem(viewPrefsStorageKey) ?? "") as Partial<ViewPrefs> | null;
+    return {
+      grouping: value?.grouping === "flat" ? "flat" : "workspace",
+      sort: value?.sort === "recent" ? "recent" : "manual"
+    };
+  } catch { return { grouping: "workspace", sort: "manual" }; }
+}
 const permissionOptions: Array<{ value: Permission; label: string }> = [
   { value: "ask", label: "Workspace Write" },
   { value: "auto", label: "Workspace Auto" },
@@ -39,24 +51,55 @@ function projectKey(path: string | null | undefined) {
   return path || "__local__";
 }
 
-function historyTitle(entry: HistoryEntry) {
-  return entry.name?.trim() || entry.preview?.trim() || "未命名会话";
+function historyTitle(entry: HistoryEntry, displayNames: Record<string, string> = {}) {
+  const custom = displayNames[entry.id]?.trim();
+  return custom || entry.name?.trim() || entry.preview?.trim() || "未命名会话";
 }
 
-function projectGroups(projectPath: string | null | undefined, history: HistoryEntry[] | undefined, unassignedThreadIds: string[] = [], threadProjectPaths: Record<string, string | null> = {}): ProjectGroup[] {
+function boundProjectPath(entry: HistoryEntry, unassignedThreadIds: string[], threadProjectPaths: Record<string, string | null>) {
+  if (Object.prototype.hasOwnProperty.call(threadProjectPaths, entry.id)) return threadProjectPaths[entry.id];
+  return unassignedThreadIds.includes(entry.id) ? null : entry.cwd || null;
+}
+
+type GroupOptions = {
+  displayNames?: Record<string, string>;
+  projectMeta?: Record<string, { name?: string; folders?: string[] }>;
+  removedProjects?: string[];
+  sort?: "manual" | "recent";
+};
+
+function entryTime(entry: HistoryEntry) {
+  return entry.updatedAt ?? entry.createdAt ?? 0;
+}
+
+function projectGroups(projectPath: string | null | undefined, history: HistoryEntry[] | undefined, unassignedThreadIds: string[] = [], threadProjectPaths: Record<string, string | null> = {}, options: GroupOptions = {}): ProjectGroup[] {
   const groups = new Map<string, ProjectGroup>();
   const unassigned = new Set(unassignedThreadIds);
+  const removed = new Set(options.removedProjects ?? []);
   const currentKey = projectKey(projectPath);
-  if (projectPath) groups.set(currentKey, { key: currentKey, path: projectPath, name: projectName(projectPath), entries: [], isCurrent: true });
+  if (projectPath && !removed.has(projectPath)) {
+    const customName = options.projectMeta?.[projectPath]?.name?.trim();
+    groups.set(currentKey, { key: currentKey, path: projectPath, name: customName || projectName(projectPath), entries: [], isCurrent: true });
+  }
   for (const entry of history ?? []) {
-    const path = Object.prototype.hasOwnProperty.call(threadProjectPaths, entry.id) ? threadProjectPaths[entry.id] : (unassigned.has(entry.id) ? null : entry.cwd || null);
-    if (!path) continue;
+    const path = boundProjectPath(entry, unassignedThreadIds, threadProjectPaths);
+    if (!path || removed.has(path)) continue;
     const key = projectKey(path);
     const existing = groups.get(key);
     if (existing) existing.entries.push(entry);
-    else groups.set(key, { key, path, name: projectName(path), entries: [entry], isCurrent: key === currentKey });
+    else {
+      const customName = options.projectMeta?.[path]?.name?.trim();
+      groups.set(key, { key, path, name: customName || projectName(path), entries: [entry], isCurrent: key === currentKey });
+    }
   }
-  return [...groups.values()].sort((a, b) => Number(b.isCurrent) - Number(a.isCurrent) || a.name.localeCompare(b.name));
+  for (const [path, meta] of Object.entries(options.projectMeta ?? {})) {
+    if (!meta.name?.trim() || groups.has(projectKey(path)) || removed.has(path)) continue;
+    groups.set(projectKey(path), { key: projectKey(path), path, name: meta.name.trim(), entries: [], isCurrent: path === projectPath });
+  }
+  const sorted = [...groups.values()];
+  if (options.sort === "recent") sorted.sort((a, b) => Math.max(...b.entries.map(entryTime), 0) - Math.max(...a.entries.map(entryTime), 0) || a.name.localeCompare(b.name));
+  else sorted.sort((a, b) => Number(b.isCurrent) - Number(a.isCurrent) || a.name.localeCompare(b.name));
+  return sorted;
 }
 
 function recentHistory(projectPath: string | null | undefined, history: HistoryEntry[] | undefined, unassignedThreadIds: string[] = [], threadProjectPaths: Record<string, string | null> = {}) {
@@ -84,8 +127,13 @@ function imagesFromThreadItem(item: Record<string, unknown>): UserImage[] {
   return item.content.flatMap((entry) => {
     if (!entry || typeof entry !== "object") return [];
     const value = entry as Record<string, unknown>;
-    if (value.type !== "localImage" || typeof value.path !== "string") return [];
-    return [{ path: value.path, name: value.path.split(/[\\/]/).pop() ?? value.path, preview: imagePreviewFromPath(value.path) }];
+    if (value.type === "localImage" && typeof value.path === "string") {
+      return [{ path: value.path, name: value.path.split(/[\\/]/).pop() ?? value.path, image: true, preview: imagePreviewFromPath(value.path) }];
+    }
+    if (value.type === "mention" && typeof value.path === "string") {
+      return [{ path: value.path, name: typeof value.name === "string" ? value.name : value.path.split(/[\\/]/).pop() ?? value.path, image: false }];
+    }
+    return [];
   });
 }
 
@@ -134,7 +182,18 @@ function formatMessageTime(timestamp?: number) {
 }
 
 function entriesToChatMessages(entries: HistoryMessage[]): ChatMessage[] {
-  return entries.map((entry, index) => ({ id: `history-${index}-${entry.role}`, role: entry.role, content: entry.text, images: entry.images, reasoning: [], tool: entry.parts?.find((part) => part.kind === "tool")?.tool ?? null, parts: entry.role === "assistant" ? (entry.parts?.length ? entry.parts : [{ id: `history-part-${index}`, kind: "text", text: entry.text, streaming: false }]) : undefined, streaming: false, completedAt: entry.role === "assistant" ? Date.now() : undefined }));
+  return entries.map((entry, index) => ({
+    id: `history-${index}-${entry.role}`,
+    role: entry.role,
+    content: entry.text,
+    images: entry.images?.filter((item) => item.image !== false),
+    files: entry.images?.filter((item) => item.image === false),
+    reasoning: [],
+    tool: entry.parts?.find((part) => part.kind === "tool")?.tool ?? null,
+    parts: entry.role === "assistant" ? (entry.parts?.length ? entry.parts : [{ id: `history-part-${index}`, kind: "text", text: entry.text, streaming: false }]) : undefined,
+    streaming: false
+    // 历史回放拿不到真实的完成时刻，宁可留空也不用页面渲染时间冒充。
+  }));
 }
 
 function toolFromItem(item: unknown, fallbackId?: string): ToolCall | null {
@@ -198,7 +257,11 @@ function MarkdownText({ text }: { text: string }) {
 }
 
 function UserMessageContent({ message }: { message: ChatMessage }) {
-  return <>{message.images?.length ? <div className="user-images">{message.images.map((image) => image.preview ? <img key={image.path} src={image.preview} alt="已发送图片" /> : <div className="user-image-placeholder" key={image.path}><Paperclip size={18} /></div>)}</div> : null}{message.content ? <MarkdownText text={message.content} /> : null}</>;
+  return <>
+    {message.images?.length ? <div className="user-images">{message.images.map((image) => image.preview ? <img key={image.path} src={image.preview} alt="已发送图片" /> : <div className="user-image-placeholder" key={image.path}><Paperclip size={18} /></div>)}</div> : null}
+    {message.files?.length ? <div className="user-files">{message.files.map((file) => <span className="user-file-chip" key={file.path} title={file.path}><FileText size={14} /><span>{file.name}</span></span>)}</div> : null}
+    {message.content ? <MarkdownText text={message.content} /> : null}
+  </>;
 }
 
 function itemSourceId(params: Record<string, unknown>) {
@@ -407,6 +470,11 @@ function App() {
     activeThreadId: string | null;
     unassignedThreadIds?: string[];
     threadProjectPaths?: Record<string, string | null>;
+    threadDisplayNames?: Record<string, string>;
+    pinnedThreadIds?: string[];
+    projectMeta?: Record<string, { name?: string; folders?: string[] }>;
+    pinnedProjects?: string[];
+    removedProjects?: string[];
     history: HistoryEntry[];
     sidecar: string;
     gateway: string;
@@ -414,8 +482,18 @@ function App() {
   }>();
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   const [expandedSessionLists, setExpandedSessionLists] = useState<Record<string, boolean>>({});
+  const [viewPrefs, setViewPrefs] = useState<ViewPrefs>(loadViewPrefs);
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sessionMenu, setSessionMenu] = useState<{ threadId: string; projectPath: string | null } | null>(null);
+  const [moveMenuOpen, setMoveMenuOpen] = useState(false);
+  const [renamingThread, setRenamingThread] = useState<{ threadId: string; value: string } | null>(null);
+  const [projectMenu, setProjectMenu] = useState<{ path: string | null } | null>(null);
+  const [editProject, setEditProject] = useState<{ path: string; name: string; folders: string[] } | null>(null);
+  const [quickPanelOpen, setQuickPanelOpen] = useState(false);
   const [input, setInput] = useState("");
-  const [attachments, setAttachments] = useState<Array<{ path: string; name: string; preview?: string }>>([]);
+  const [attachments, setAttachments] = useState<UserImage[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [model, setModel] = useState("gpt-5.6-sol");
   const [intensity, setIntensity] = useState("中");
@@ -424,6 +502,7 @@ function App() {
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [composerToolsOpen, setComposerToolsOpen] = useState(false);
   const [planMode, setPlanMode] = useState(false);
+  const [goalText, setGoalText] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [recentPrompts, setRecentPrompts] = useState<string[]>([
@@ -460,13 +539,55 @@ function App() {
       setOpenMenu(null);
       setComposerToolsOpen(false);
       setWorkspaceMenuOpen(false);
+      if (target instanceof Element && target.closest(".sidebar-flyout, .sidebar-view-trigger, .sidebar-search-trigger, .sidebar-search")) return;
+      setViewMenuOpen(false);
+      if (target instanceof Element && target.closest(".session-menu, .session-more")) return;
+      setSessionMenu(null);
+      setMoveMenuOpen(false);
+      if (target instanceof Element && target.closest(".project-menu, .project-more")) return;
+      setProjectMenu(null);
+      if (target instanceof Element && target.closest(".quick-panel, .quick-panel-trigger")) return;
+      setQuickPanelOpen(false);
     };
     document.addEventListener("pointerdown", closeMenusOnOutsidePointer);
     return () => document.removeEventListener("pointerdown", closeMenusOnOutsidePointer);
   }, []);
 
-  const groups = projectGroups(state?.projectPath, state?.history, state?.unassignedThreadIds, state?.threadProjectPaths);
+  const displayNames = state?.threadDisplayNames ?? {};
+  const projectMetaMap = state?.projectMeta ?? {};
+  const removedProjects = state?.removedProjects ?? [];
+  const pinnedThreads = state?.pinnedThreadIds ?? [];
+  const pinnedProjects = state?.pinnedProjects ?? [];
+  const allGroups = projectGroups(state?.projectPath, state?.history, state?.unassignedThreadIds, state?.threadProjectPaths, { displayNames, projectMeta: projectMetaMap, removedProjects, sort: viewPrefs.sort });
   const recentEntries = recentHistory(state?.projectPath, state?.history, state?.unassignedThreadIds, state?.threadProjectPaths);
+  const pinnedThreadSet = new Set(pinnedThreads);
+  const pinnedProjectSet = new Set(pinnedProjects);
+  const query = searchQuery.trim().toLowerCase();
+  const matchesQuery = (title: string, groupName?: string) => !query || title.toLowerCase().includes(query) || (groupName !== undefined && groupName.toLowerCase().includes(query));
+  const groups = allGroups
+    .filter((group) => !pinnedProjectSet.has(group.path ?? ""))
+    .map((group) => ({ ...group, entries: group.entries.filter((entry) => !pinnedThreadSet.has(entry.id)) }))
+    .map((group) => ({ ...group, entries: group.entries.filter((entry) => matchesQuery(historyTitle(entry, displayNames), group.name)) }))
+    .filter((group) => matchesQuery(group.name) || group.entries.length > 0 || group.isCurrent);
+  const flatEntries = allGroups
+    .flatMap((group) => group.entries)
+    .filter((entry) => !pinnedThreadSet.has(entry.id) && matchesQuery(historyTitle(entry, displayNames)))
+    .sort((a, b) => viewPrefs.sort === "recent" ? entryTime(b) - entryTime(a) : 0);
+  const recentFiltered = recentEntries
+    .filter((entry) => !pinnedThreadSet.has(entry.id) && matchesQuery(historyTitle(entry, displayNames)));
+  const pinnedThreadGroups = allGroups
+    .map((group) => ({ ...group, entries: group.entries.filter((entry) => pinnedThreadSet.has(entry.id) && matchesQuery(historyTitle(entry, displayNames), group.name)) }))
+    .filter((group) => group.entries.length > 0);
+  const pinnedProjectGroups = allGroups.filter((group) => pinnedProjectSet.has(group.path ?? ""));
+  const pinnedProjectsHaveContent = Boolean(pinnedProjectGroups.length || pinnedThreadGroups.length);
+
+  function updateViewPrefs(next: Partial<ViewPrefs>) {
+    setViewPrefs((current) => {
+      const merged = { ...current, ...next };
+      try { localStorage.setItem(viewPrefsStorageKey, JSON.stringify(merged)); } catch { /* persistence is best effort */ }
+      return merged;
+    });
+  }
 
   useEffect(() => {
     if (!groups.length) return;
@@ -491,6 +612,10 @@ function App() {
         const entries = latestThreadMessages(await window.desktop.loadThread(nextState.activeThreadId));
         if (entries.length) setMessages(entriesToChatMessages(entries));
       } catch { /* a stale persisted thread should not prevent launch */ }
+      try {
+        const { goal } = await window.desktop.getGoal();
+        setGoalText(goal?.objective?.trim() || null);
+      } catch { /* goal lookup is optional */ }
     });
   }, []);
 
@@ -531,9 +656,15 @@ function App() {
   useEffect(() => {
     if (!window.desktop?.onAppServerEvent) return;
     return window.desktop.onAppServerEvent((event) => {
+      const params = event.params ?? {};
+      if (event.method === "thread/goal/updated") {
+        const goal = params.goal as { objective?: unknown } | undefined;
+        setGoalText(typeof goal?.objective === "string" && goal.objective.trim() ? goal.objective : null);
+        return;
+      }
+      if (event.method === "thread/goal/cleared") { setGoalText(null); return; }
       const id = activeAssistantId.current;
       if (!id) return;
-      const params = event.params ?? {};
       if (event.method === "item/reasoning/summaryTextDelta" || event.method === "item/reasoning/textDelta") {
         const index = Number.isInteger(params.summaryIndex) ? Number(params.summaryIndex) : (Number.isInteger(params.contentIndex) ? Number(params.contentIndex) : 0);
         setMessages((current) => current.map((message) => {
@@ -644,6 +775,10 @@ function App() {
       const entries = latestThreadMessages(await window.desktop.loadThread(threadId, projectPath));
       setMessages(entriesToChatMessages(entries));
       setState(await window.desktop.state());
+      const { goal } = await window.desktop.getGoal().catch(() => ({ goal: null }) as { goal?: { objective?: string } | null });
+      setGoalText(goal?.objective?.trim() || null);
+      setSessionMenu(null);
+      setMoveMenuOpen(false);
       setNotice("已恢复本地会话");
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -654,8 +789,8 @@ function App() {
     const message = input.trim();
     const outgoingAttachments = attachments;
     if (!message && !outgoingAttachments.length) {
-      setNotice("请输入任务内容或添加图片");
-      setErrorMessage("请输入任务内容或添加图片");
+      setNotice("请输入任务内容或添加附件");
+      setErrorMessage("请输入任务内容或添加附件");
       return;
     }
     if (!window.desktop?.stream) {
@@ -666,15 +801,27 @@ function App() {
     if (message) setRecentPrompts((current) => [message, ...current.filter((prompt) => prompt !== message)].slice(0, 5));
     const assistantId = `message-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     activeAssistantId.current = assistantId;
-    setMessages((current) => [...current, { id: `user-${assistantId}`, role: "user", content: message, images: outgoingAttachments }, { id: assistantId, role: "assistant", content: "", reasoning: [], tool: null, streaming: true }]);
+    setMessages((current) => [...current, {
+      id: `user-${assistantId}`,
+      role: "user",
+      content: message,
+      images: outgoingAttachments.filter((item) => item.image !== false),
+      files: outgoingAttachments.filter((item) => item.image === false)
+    }, { id: assistantId, role: "assistant", content: "", reasoning: [], tool: null, streaming: true }]);
     setInput("");
     setAttachments([]);
-    setNotice("正在流式请求 GPT...");
+    setNotice(planMode ? "正在以计划模式流式请求 GPT..." : "正在流式请求 GPT...");
     setErrorMessage("");
     setSending(true);
+    const planForThisTurn = planMode;
     try {
-      const turnInput = [...(message ? [{ type: "text" as const, text: message }] : []), ...outgoingAttachments.map(({ path }) => ({ type: "localImage" as const, path }))];
-      const result = await window.desktop.stream(turnInput, { effort: intensity === "低" ? "low" : intensity === "高" ? "high" : "medium", planMode });
+      const turnInput = [
+        ...(message ? [{ type: "text" as const, text: message }] : []),
+        ...outgoingAttachments.map((item) => item.image === false
+          ? { type: "mention" as const, name: item.name, path: item.path }
+          : { type: "localImage" as const, path: item.path })
+      ];
+      const result = await window.desktop.stream(turnInput, { effort: intensity === "低" ? "low" : intensity === "高" ? "high" : "medium", planMode: planForThisTurn });
       setMessages((current) => current.map((item) => {
         if (item.id !== assistantId) return item;
         const parts = (item.parts?.length ? item.parts : result.output ? [{ id: `text-${assistantId}`, kind: "text" as const, text: result.output }] : []).map((part) => ({ ...part, streaming: false }));
@@ -690,6 +837,8 @@ function App() {
     } finally {
       activeAssistantId.current = null;
       setSending(false);
+      // 计划模式只作用于一次提问：无论成败，本轮结束后都退出 plan。
+      if (planForThisTurn) setPlanMode(false);
     }
   }
 
@@ -702,9 +851,13 @@ function App() {
     }
   }
 
-  async function addFiles() {
-      const files = await window.desktop.chooseFiles();
-      if (files.length) { setAttachments((current) => [...current, ...files]); setComposerToolsOpen(false); setNotice(`已添加 ${files.length} 张图片`); }
+  async function addFiles(mode: "image" | "file") {
+    const files = await window.desktop.chooseFiles(mode);
+    if (files.length) {
+      setAttachments((current) => [...current, ...files.map(({ path, name, image, preview }) => ({ path, name, image, preview }))]);
+      setComposerToolsOpen(false);
+      setNotice(`已添加 ${files.length} 个文件`);
+    }
   }
 
   async function handleComposerPaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
@@ -720,11 +873,135 @@ function App() {
   }
 
   async function setGoal() {
-    const objective = window.prompt("设置持续目标");
-    if (!objective?.trim()) return;
-    await window.desktop.setGoal(objective);
+    const objective = input.trim();
     setComposerToolsOpen(false);
-    setNotice("目标已保存");
+    if (!objective) {
+      setNotice("请先在输入框输入目标内容，再点击“目标”");
+      setErrorMessage("请先在输入框输入目标内容，再点击“目标”");
+      return;
+    }
+    try {
+      await window.desktop.setGoal(objective);
+      setGoalText(objective);
+      setInput("");
+      setErrorMessage("");
+      setNotice("目标已保存，将持续作用于当前会话");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setNotice(`目标保存失败：${message}`);
+      setErrorMessage(`目标保存失败：${message}`);
+    }
+  }
+
+  async function clearGoal() {
+    try {
+      await window.desktop.clearGoal();
+      setGoalText(null);
+      setNotice("已清除当前会话目标");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function commitThreadRename() {
+    if (!renamingThread) return;
+    const { threadId, value } = renamingThread;
+    setRenamingThread(null);
+    try {
+      const names = await window.desktop.setThreadName(threadId, value);
+      setState((current) => current ? { ...current, threadDisplayNames: names } : current);
+      setNotice(value.trim() ? "会话已重命名" : "已恢复默认会话名");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function toggleThreadPin(threadId: string) {
+    try {
+      const pinned = await window.desktop.toggleThreadPin(threadId);
+      setState((current) => current ? { ...current, pinnedThreadIds: pinned } : current);
+      setSessionMenu(null);
+      setNotice(pinned.includes(threadId) ? "已置顶该会话" : "已取消置顶");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function moveThreadToProject(threadId: string, path: string | null) {
+    try {
+      await window.desktop.setThreadProject(threadId, path);
+      setSessionMenu(null);
+      setMoveMenuOpen(false);
+      setState(await window.desktop.state());
+      setNotice(path ? "会话已移至目标项目" : "会话已移出项目");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function toggleProjectPin(path: string | null) {
+    if (!path) return;
+    try {
+      const pinned = await window.desktop.toggleProjectPin(path);
+      setState((current) => current ? { ...current, pinnedProjects: pinned } : current);
+      setProjectMenu(null);
+      setNotice(pinned.includes(path) ? "已置顶该项目" : "已取消项目置顶");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function revealProject(path: string | null) {
+    if (!path) return;
+    setProjectMenu(null);
+    try {
+      await window.desktop.revealProject(path);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function saveEditProject() {
+    if (!editProject) return;
+    const { path, name, folders } = editProject;
+    try {
+      const meta = await window.desktop.setProjectMeta(path, { name: name.trim() || undefined, folders });
+      setState((current) => current ? { ...current, projectMeta: meta } : current);
+      setEditProject(null);
+      setNotice("项目设置已保存");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function addEditProjectFolder() {
+    if (!editProject) return;
+    try {
+      const folders = await window.desktop.chooseFolders();
+      if (!folders.length) return;
+      setEditProject((current) => current ? { ...current, folders: [...current.folders, ...folders.filter((folder) => !current.folders.includes(folder))] } : current);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function removeEditProject() {
+    if (!editProject) return;
+    const { path } = editProject;
+    try {
+      await window.desktop.removeProject(path);
+      setEditProject(null);
+      setProjectMenu(null);
+      const nextState = await window.desktop.state();
+      setState(nextState);
+      if (!nextState.activeThreadId) {
+        setMessages([]);
+        activeAssistantId.current = null;
+      }
+      setNotice("已从列表移除项目（磁盘文件不受影响）");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
   }
 
   async function preview() {
@@ -790,9 +1067,115 @@ function App() {
     }
   }
 
+  async function removeProject(path: string) {
+    try {
+      await window.desktop.removeProject(path);
+      setEditProject(null);
+      setProjectMenu(null);
+      const nextState = await window.desktop.state();
+      setState(nextState);
+      if (!nextState.activeThreadId) {
+        setMessages([]);
+        activeAssistantId.current = null;
+      }
+      setNotice("已从列表移除项目（磁盘文件不受影响）");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  const sessionRow = (entry: HistoryEntry, projectPath: string | null, variant: "session" | "recent" = "session") => {
+    const title = historyTitle(entry, displayNames);
+    const isRenaming = renamingThread?.threadId === entry.id;
+    const menuOpen = sessionMenu?.threadId === entry.id;
+    const isActive = entry.id === state?.activeThreadId;
+    const rowClass = variant === "recent" ? `recent-session ${isActive ? "active-recent" : ""}` : `session-row ${isActive ? "active-session" : ""}`;
+    const moveTargets = allGroups.filter((group) => group.path && group.path !== projectPath);
+    return (
+      <div className={`session-row-container ${variant === "recent" ? "as-recent" : ""}`} key={entry.id}>
+        {isRenaming ? <input
+          className="session-rename"
+          autoFocus
+          value={renamingThread.value}
+          aria-label="重命名会话"
+          onChange={(event) => setRenamingThread({ threadId: entry.id, value: event.target.value })}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") { event.preventDefault(); void commitThreadRename(); }
+            if (event.key === "Escape") setRenamingThread(null);
+          }}
+          onBlur={() => void commitThreadRename()}
+        /> : <button className={rowClass} title={entry.cwd ?? "本地会话"} onClick={() => void loadHistory(entry.id, projectPath)}>
+          {variant === "session" && <span className="session-status" aria-hidden="true"><MessageCircle size={13} /></span>}
+          <span className="thread-copy"><strong>{title}</strong></span>
+        </button>}
+        <button className="session-more" type="button" title="会话选项" aria-label={`会话选项：${title}`} aria-expanded={menuOpen} onClick={(event) => { event.stopPropagation(); setSessionMenu(menuOpen ? null : { threadId: entry.id, projectPath }); setMoveMenuOpen(false); }}><MoreHorizontal size={15} /></button>
+        {menuOpen && <div className="session-menu" role="menu" aria-label={`会话选项：${title}`}>
+          <button role="menuitem" onClick={() => void toggleThreadPin(entry.id)}>
+            <span aria-hidden="true">{pinnedThreadSet.has(entry.id) ? <PinOff size={15} /> : <Pin size={15} />}</span>
+            {pinnedThreadSet.has(entry.id) ? "取消置顶" : "置顶"}
+            <small>Ctrl+Alt+P</small>
+          </button>
+          <button role="menuitem" onClick={() => { setRenamingThread({ threadId: entry.id, value: title === "未命名会话" ? "" : title }); setSessionMenu(null); }}>
+            <span aria-hidden="true"><SquarePen size={15} /></span>重命名<small>Ctrl+Alt+R</small>
+          </button>
+          <div className="session-menu-sub-wrap">
+            <button role="menuitem" aria-expanded={moveMenuOpen} onClick={() => setMoveMenuOpen((open) => !open)}>
+              <span aria-hidden="true"><FolderOpen size={15} /></span>移至项目
+              <span className="session-menu-chevron" aria-hidden="true"><ChevronRight size={13} /></span>
+            </button>
+            {moveMenuOpen && <div className="session-menu-sub" role="menu">
+              {moveTargets.map((group) => <button key={group.key} role="menuitem" onClick={() => void moveThreadToProject(entry.id, group.path)}><FolderOpen size={14} /><span>{group.name}</span></button>)}
+              {projectPath !== null && <button role="menuitem" onClick={() => void moveThreadToProject(entry.id, null)}><MessageCircle size={14} /><span>不使用项目</span></button>}
+              {!moveTargets.length && projectPath === null && <div className="session-menu-empty">暂无其他项目</div>}
+            </div>}
+          </div>
+        </div>}
+      </div>
+    );
+  };
+
+  const projectGroupBlock = (group: ProjectGroup) => {
+    const expanded = expandedProjects[group.key] ?? group.isCurrent;
+    const menuOpen = Boolean(group.path) && projectMenu?.path === group.path;
+    const meta = projectMetaMap[group.path ?? ""] ?? {};
+    return <div className={`project-group ${group.isCurrent ? "current-project-group" : ""}`} key={group.key}>
+      <div className="project-row-container">
+        <button className={`project-row ${group.isCurrent ? "active-project" : ""}`} onClick={() => setExpandedProjects((current) => ({ ...current, [group.key]: !expanded }))} title={group.name} aria-expanded={expanded}>
+          <span className="folder-icon" aria-hidden="true"><FolderOpen size={19} /></span>
+          <span className="thread-copy"><strong>{group.name}</strong></span>
+          {group.entries.length > 0 && <span className="project-count">{group.entries.length}</span>}
+        </button>
+        <button className="project-new-chat" type="button" title={`在 ${group.name} 中新建会话`} aria-label={`在 ${group.name} 中新建会话`} onClick={(event) => { event.stopPropagation(); void startNewChat(group.path ?? undefined); }}><SquarePen size={17} /></button>
+        {group.path && <button className="project-more" type="button" title="项目选项" aria-label={`项目选项：${group.name}`} aria-expanded={menuOpen} onClick={(event) => { event.stopPropagation(); setProjectMenu(menuOpen ? null : { path: group.path }); }}><MoreHorizontal size={15} /></button>}
+        {menuOpen && group.path && <div className="project-menu" role="menu" aria-label={`项目选项：${group.name}`}>
+          <button role="menuitem" onClick={() => void toggleProjectPin(group.path)}>
+            <span aria-hidden="true">{pinnedProjectSet.has(group.path) ? <PinOff size={15} /> : <Pin size={15} />}</span>
+            {pinnedProjectSet.has(group.path) ? "取消置顶" : "置顶"}
+          </button>
+          <button role="menuitem" onClick={() => setEditProject({ path: group.path!, name: meta.name || projectName(group.path), folders: meta.folders?.length ? meta.folders : [group.path!] })}>
+            <span aria-hidden="true"><Pencil size={15} /></span>编辑
+          </button>
+          <button role="menuitem" onClick={() => void revealProject(group.path)}>
+            <span aria-hidden="true"><FolderOpen size={15} /></span>在资源管理器中打开
+          </button>
+          <div className="menu-divider" />
+          <button role="menuitem" className="project-menu-danger" onClick={() => void removeProject(group.path)}>
+            <span aria-hidden="true"><X size={15} /></span>移除项目
+          </button>
+        </div>}
+      </div>
+      {expanded && <div className="project-sessions">
+        {group.entries.length ? <>
+          {(expandedSessionLists[group.key] ? group.entries : group.entries.slice(0, 3)).map((entry) => sessionRow(entry, group.path))}
+          {group.entries.length > 3 && <button className="show-more-sessions" type="button" onClick={() => setExpandedSessionLists((current) => ({ ...current, [group.key]: !current[group.key] }))}>{expandedSessionLists[group.key] ? "收起显示" : "展开显示"}</button>}
+        </> : <div className="project-empty">暂无会话</div>}
+      </div>}
+    </div>;
+  };
+
   const hasConversation = messages.length > 0;
   const activeHistoryEntry = state?.history.find((entry) => entry.id === state?.activeThreadId);
-  const conversationTitle = activeHistoryEntry ? historyTitle(activeHistoryEntry) : hasConversation ? "本地编程任务" : "新会话";
+  const conversationTitle = activeHistoryEntry ? historyTitle(activeHistoryEntry, displayNames) : hasConversation ? "本地编程任务" : "新会话";
 
   return (
     <div className="app-window">
@@ -800,7 +1183,19 @@ function App() {
         <div className="window-title"><img src={brandFavicon} alt="" aria-hidden="true" /><span>Codex Harness</span></div>
         <div className="window-controls"><button className="menu-icon" title="切换侧栏" aria-label="切换侧栏">◧</button><button className="menu-icon" title="后退" aria-label="后退">←</button><button className="menu-icon muted-icon" title="前进" aria-label="前进">→</button></div>
         <nav className="app-menus" aria-label="应用菜单"><button>文件</button><button>编辑</button><button>视图</button><button>帮助</button></nav>
-        <div className="window-actions"><button className="menu-icon" title="最小化" aria-label="最小化" onClick={() => void window.desktop?.window.minimize()}><Minus size={16} /></button><button className="menu-icon" title="最大化" aria-label="最大化" onClick={() => void window.desktop?.window.toggleMaximize()}><Square size={15} /></button><button className="menu-icon close-icon" title="关闭" aria-label="关闭" onClick={() => void window.desktop?.window.close()}><X size={17} /></button></div>
+        <div className="window-actions">
+          <button className="menu-icon quick-panel-trigger" title="快捷面板" aria-label="快捷面板" aria-expanded={quickPanelOpen} onClick={() => setQuickPanelOpen((open) => !open)}><List size={17} /></button>
+          <button className="menu-icon" title="最小化" aria-label="最小化" onClick={() => void window.desktop?.window.minimize()}><Minus size={16} /></button>
+          <button className="menu-icon" title="最大化" aria-label="最大化" onClick={() => void window.desktop?.window.toggleMaximize()}><Square size={15} /></button>
+          <button className="menu-icon close-icon" title="关闭" aria-label="关闭" onClick={() => void window.desktop?.window.close()}><X size={17} /></button>
+        </div>
+        {quickPanelOpen && <div className="quick-panel" role="menu" aria-label="快捷面板">
+          <button role="menuitem" onClick={() => { setQuickPanelOpen(false); setTool("diff"); }}>
+            <span aria-hidden="true"><FileText size={16} /></span>
+            <span className="quick-panel-label">文件</span>
+            <small>Ctrl+P</small>
+          </button>
+        </div>}
       </div>
       <div className="app-shell">
       <aside className={`sidebar ${sidebarCollapsed ? "is-collapsed" : ""}`} style={sidebarCollapsed ? { width: 64, flexBasis: 64 } : sidebarWidth === null ? undefined : { width: sidebarWidth, flexBasis: sidebarWidth }}>
@@ -812,35 +1207,51 @@ function App() {
         <button className="new-chat-button" onClick={() => void startNewChat()}><span className="new-chat-icon"><MessageCirclePlus size={19} /></span><span>新对话</span></button>
 
         <div className="sidebar-scroll">
-          <div className="sidebar-section">
-            <div className="section-label section-label-with-action"><span>工作区</span><span className="workspace-actions"><button className="tiny-action" title="搜索会话" aria-label="搜索会话"><Search size={17} /></button><button className="tiny-action" title="筛选工作区" aria-label="筛选工作区"><SlidersHorizontal size={17} /></button><button className="tiny-action" title="添加或选择项目" aria-label="添加或选择项目" onClick={chooseProject}><Plus size={18} /></button></span></div>
+          {pinnedProjectsHaveContent && <div className="sidebar-section pinned-section">
+            <div className="section-label section-label-with-action"><span>置顶</span></div>
             <div className="project-list">
-              {groups.length ? groups.map((group) => {
-                const expanded = expandedProjects[group.key] ?? group.isCurrent;
-                return <div className={`project-group ${group.isCurrent ? "current-project-group" : ""}`} key={group.key}>
-                  <div className="project-row-container">
-                    <button className={`project-row ${group.isCurrent ? "active-project" : ""}`} onClick={() => setExpandedProjects((current) => ({ ...current, [group.key]: !expanded }))} title={group.name} aria-expanded={expanded}>
-                      <span className="folder-icon" aria-hidden="true"><FolderOpen size={19} /></span>
-                      <span className="thread-copy"><strong>{group.name}</strong></span>
-                      {group.entries.length > 0 && <span className="project-count">{group.entries.length}</span>}
-                    </button>
-                    <button className="project-new-chat" type="button" title={`在 ${group.name} 中新建会话`} aria-label={`在 ${group.name} 中新建会话`} onClick={(event) => { event.stopPropagation(); void startNewChat(group.path ?? undefined); }}><SquarePen size={17} /></button>
-                  </div>
-                  {expanded && <div className="project-sessions">
-                    {group.entries.length ? <>
-                      {(expandedSessionLists[group.key] ? group.entries : group.entries.slice(0, 3)).map((entry) => <button className={`session-row ${entry.id === state?.activeThreadId ? "active-session" : ""}`} title={entry.cwd ?? "本地会话"} key={entry.id} onClick={() => void loadHistory(entry.id, group.path)}><span className="session-status" aria-hidden="true"><MessageCircle size={13} /></span><span className="thread-copy"><strong>{historyTitle(entry)}</strong></span></button>)}
-                      {group.entries.length > 3 && <button className="show-more-sessions" type="button" onClick={() => setExpandedSessionLists((current) => ({ ...current, [group.key]: !current[group.key] }))}>{expandedSessionLists[group.key] ? "收起显示" : "展开显示"}</button>}
-                    </> : <div className="project-empty">暂无会话</div>}
-                  </div>}
-                </div>;
-              }) : <div className="sidebar-empty">选择一个本地项目开始</div>}
+              {pinnedProjectGroups.map((group) => projectGroupBlock(group))}
+              {pinnedThreadGroups.map((group) => <div className="pinned-thread-group" key={`pinned-threads-${group.key}`}>
+                <div className="pinned-group-name"><FolderOpen size={14} /><span>{group.name}</span></div>
+                {group.entries.map((entry) => sessionRow(entry, group.path))}
+              </div>)}
+            </div>
+          </div>}
+
+          <div className="sidebar-section">
+            <div className="section-label section-label-with-action sidebar-section-head">
+              <span>工作区</span>
+              <span className="workspace-actions">
+                <button className={`tiny-action sidebar-search-trigger ${searchOpen ? "is-active" : ""}`} title="搜索会话" aria-label="搜索会话" aria-expanded={searchOpen} onClick={() => setSearchOpen((open) => { if (open) setSearchQuery(""); return !open; })}><Search size={17} /></button>
+                <button className={`tiny-action sidebar-view-trigger ${viewMenuOpen ? "is-active" : ""}`} title="视图" aria-label="视图" aria-expanded={viewMenuOpen} onClick={() => setViewMenuOpen((open) => !open)}><SlidersHorizontal size={17} /></button>
+                <button className="tiny-action" title="添加或选择项目" aria-label="添加或选择项目" onClick={chooseProject}><Plus size={18} /></button>
+              </span>
+            </div>
+            {viewMenuOpen && <div className="sidebar-flyout" role="menu" aria-label="视图">
+              <div className="menu-title">分组方式</div>
+              <button className="menu-option" role="menuitem" onClick={() => updateViewPrefs({ grouping: "workspace" })}><span>按工作区</span>{viewPrefs.grouping === "workspace" && <span className="option-check">✓</span>}</button>
+              <button className="menu-option" role="menuitem" onClick={() => updateViewPrefs({ grouping: "flat" })}><span>单列表</span>{viewPrefs.grouping === "flat" && <span className="option-check">✓</span>}</button>
+              <div className="menu-divider" />
+              <div className="menu-title">排序方式</div>
+              <button className="menu-option" role="menuitem" onClick={() => updateViewPrefs({ sort: "manual" })}><span>手动排序</span>{viewPrefs.sort === "manual" && <span className="option-check">✓</span>}</button>
+              <button className="menu-option" role="menuitem" onClick={() => updateViewPrefs({ sort: "recent" })}><span>最近更新</span>{viewPrefs.sort === "recent" && <span className="option-check">✓</span>}</button>
+            </div>}
+            {searchOpen && <div className="sidebar-search">
+              <Search size={14} aria-hidden="true" />
+              <input autoFocus value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="按会话名称搜索" aria-label="按会话名称搜索" onKeyDown={(event) => { if (event.key === "Escape") { setSearchOpen(false); setSearchQuery(""); } }} />
+              {query && <button type="button" aria-label="清除搜索" onClick={() => setSearchQuery("")}><X size={13} /></button>}
+            </div>}
+            <div className="project-list">
+              {viewPrefs.grouping === "flat"
+                ? (flatEntries.length ? flatEntries.map((entry) => sessionRow(entry, boundProjectPath(entry, state?.unassignedThreadIds ?? [], state?.threadProjectPaths ?? {}))) : <div className="sidebar-empty">{query ? "无匹配会话" : "选择一个本地项目开始"}</div>)
+                : (groups.length ? groups.map((group) => projectGroupBlock(group)) : <div className="sidebar-empty">{query ? "无匹配会话" : "选择一个本地项目开始"}</div>)}
             </div>
           </div>
 
           <div className="sidebar-section recent-section">
-            <div className="section-label section-label-with-action"><span>最近</span><span className="recent-count">{recentEntries.length || ""}</span></div>
+            <div className="section-label section-label-with-action"><span>最近</span><span className="recent-count">{recentFiltered.length || ""}</span></div>
             <div className="recent-list">
-              {recentEntries.length ? recentEntries.map((entry) => <button className={`recent-session ${entry.id === state?.activeThreadId ? "active-recent" : ""}`} title="未选择项目的本地会话" key={`recent-${entry.id}`} onClick={() => void loadHistory(entry.id, null)}><span className="thread-copy"><strong>{historyTitle(entry)}</strong></span></button>) : <div className="sidebar-empty">未选择项目的会话会显示在这里</div>}
+              {recentFiltered.length ? recentFiltered.map((entry) => sessionRow(entry, null, "recent")) : <div className="sidebar-empty">{query ? "无匹配会话" : "未选择项目的会话会显示在这里"}</div>}
             </div>
           </div>
         </div>
@@ -855,8 +1266,6 @@ function App() {
         <header className="topbar">
           <div className="topbar-title"><span className="title-folder" aria-hidden="true"><FolderOpen size={15} /></span><span className="topbar-project">{conversationTitle}</span><button className="title-menu" title="会话选项" aria-label="会话选项">•••</button></div>
           <div className="topbar-actions">
-            <button className="location-button" title="打开项目位置" onClick={chooseProject}><span>▣</span> 打开位置 <span>⌄</span></button>
-            <button className="icon-button" title="会话设置" aria-label="会话设置">☷</button>
             <button className="icon-button" title="打开工具" aria-label="打开工具" onClick={() => setTool(tool ? null : "diff")}>◫</button>
           </div>
         </header>
@@ -875,7 +1284,7 @@ function App() {
                     {recentPrompts.length ? recentPrompts.map((prompt) => <button className="recent-prompt" key={`recent-${prompt}`} onClick={() => setInput(prompt)}><span className="recent-icon">◷</span><span>{prompt}</span><span className="recent-arrow" aria-hidden="true">↗</span></button>) : <div className="recent-empty">发送过的提示会出现在这里</div>}
                   </div>
                 </div>}
-                {messages.map((message) => message.role === "user" ? <div className="message user-message" key={message.id}><div className="message-content"><UserMessageContent message={message} /></div></div> : <div className="message assistant-message" key={message.id}><div className="message-content"><div className="assistant-identity"><img src={brandFavicon} alt="" aria-hidden="true" /><span>Codex Harness</span></div><AssistantParts message={message} /><div className="message-footer">{message.streaming ? <span className="thinking-status"><span>思考中</span><span className="stream-caret" aria-hidden="true" /></span> : <><button type="button" className="message-copy" title="复制回复" aria-label="复制回复" onClick={() => void navigator.clipboard?.writeText(message.content)}><Copy size={18} /></button><time className="message-time" dateTime={message.completedAt ? new Date(message.completedAt).toISOString() : undefined}>{formatMessageTime(message.completedAt)}</time></>}</div></div></div>)}
+                {messages.map((message) => message.role === "user" ? <div className="message user-message" key={message.id}><div className="message-content"><UserMessageContent message={message} /></div></div> : <div className="message assistant-message" key={message.id}><div className="message-content"><div className="assistant-identity"><img src={brandFavicon} alt="" aria-hidden="true" /><span>Codex Harness</span></div><AssistantParts message={message} /><div className="message-footer">{message.streaming ? <span className="thinking-status"><span>思考中</span><span className="stream-caret" aria-hidden="true" /></span> : <><button type="button" className="message-copy" title="复制回复" aria-label="复制回复" onClick={() => void navigator.clipboard?.writeText(message.content)}><Copy size={18} /></button>{message.completedAt !== undefined && <time className="message-time" dateTime={new Date(message.completedAt).toISOString()}>{formatMessageTime(message.completedAt)}</time>}</>}</div></div></div>)}
                 {(diff || pendingApproval) && <div className="activity-strip"><span>◈</span><span>{diff ? "有一项文件差异待确认" : "有一条命令等待审批"}</span><button onClick={() => setTool(diff ? "diff" : "approval")}>查看</button></div>}
               </div>
             </div>
@@ -884,14 +1293,14 @@ function App() {
               <div className="composer">
                 {errorMessage && <div className="composer-error" role="alert">{errorMessage}</div>}
                 {!hasConversation && <div className="launcher-context"><div className="workspace-picker-wrap"><button className="context-picker" onClick={() => setWorkspaceMenuOpen((open) => !open)} title="选择工作区" aria-haspopup="menu" aria-expanded={workspaceMenuOpen}><FolderOpen size={17} /><strong>{projectName(state?.projectPath)}</strong></button>{workspaceMenuOpen && <div className="workspace-menu" role="menu"><button role="menuitem" onClick={() => void chooseProject()}>选择文件夹…</button><button role="menuitem" onClick={() => void clearProject()}>不使用工作区</button></div>}</div></div>}
-                {attachments.length > 0 && <div className="composer-attachments" aria-label="已添加图片">{attachments.map((attachment, index) => <span className="attachment-chip" key={attachment.path}>{attachment.preview ? <img src={attachment.preview} alt="已添加图片" /> : <span className="attachment-placeholder"><Paperclip size={16} /></span>}<button type="button" aria-label="移除图片" onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></span>)}</div>}
+                {attachments.length > 0 && <div className="composer-attachments" aria-label="已添加附件">{attachments.map((attachment, index) => <span className={`attachment-chip ${attachment.image === false ? "is-file" : ""}`} key={attachment.path} title={attachment.path}>{attachment.image === false ? <><span className="attachment-placeholder"><FileText size={16} /></span><span className="attachment-name">{attachment.name}</span></> : attachment.preview ? <img src={attachment.preview} alt="已添加图片" /> : <span className="attachment-placeholder"><Paperclip size={16} /></span>}<button type="button" aria-label="移除附件" onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></span>)}</div>}
                 <textarea value={input} onChange={(event) => { setInput(event.target.value); setErrorMessage(""); }} onPaste={(event) => void handleComposerPaste(event)} onKeyDown={handleComposerKeyDown} placeholder={hasConversation ? "输入后续修改要求" : "描述你想要构建的内容"} aria-label="任务输入" />
                 <div className="composer-menu-layer">
                   {composerToolsOpen && <div className="composer-tools-menu" role="menu" aria-label="添加工具">
                     <div className="composer-tools-title">添加</div>
-                    <button role="menuitem" onClick={() => void addFiles()}><Paperclip size={18} /><strong>文件和文件夹</strong><span>添加图片到当前请求</span></button>
-                    <button role="menuitem" onClick={() => void setGoal()}><Target size={18} /><strong>目标</strong><span>设置要持续追求的目标</span></button>
-                    <button role="menuitem" className={planMode ? "tool-selected" : ""} onClick={() => { setPlanMode((active) => !active); setComposerToolsOpen(false); setNotice(planMode ? "已关闭计划模式" : "已开启计划模式"); }}><Lightbulb size={18} /><strong>计划模式</strong><span>{planMode ? "已开启计划模式" : "开启计划模式"}</span></button>
+                    <button role="menuitem" onClick={() => void addFiles("file")}><Paperclip size={18} /><strong>文件</strong><span>选择本地文件随消息发送</span></button>
+                    <button role="menuitem" onClick={() => void setGoal()}><Target size={18} /><strong>目标</strong><span>用输入框内容设置要持续追求的目标</span></button>
+                    <button role="menuitem" className={planMode ? "tool-selected" : ""} onClick={() => { setPlanMode((active) => !active); setComposerToolsOpen(false); setNotice(planMode ? "已关闭计划模式" : "已开启计划模式，仅下一次提问生效"); }}><Lightbulb size={18} /><strong>计划模式</strong><span>{planMode ? "已开启，仅下一次提问生效" : "开启计划模式"}</span></button>
                   </div>}
                   {openMenu === "permission" && <div className="composer-menu permission-menu" role="menu" aria-label="命令权限">
                     <div className="menu-title">应如何批准本地操作？</div>
@@ -906,7 +1315,12 @@ function App() {
                   </div>}
                 </div>
                 <div className="composer-footer">
-                  <div className="composer-left"><button className="composer-icon" title="添加上下文" aria-label="添加上下文" aria-expanded={composerToolsOpen} onClick={() => { setComposerToolsOpen((open) => !open); setOpenMenu(null); }}><Plus size={19} /></button><button className={`menu-trigger permission-trigger ${permission !== "ask" ? "permission-selected" : ""}`} title="命令权限" aria-label="命令权限" aria-expanded={openMenu === "permission"} onClick={() => { setOpenMenu(openMenu === "permission" ? null : "permission"); setComposerToolsOpen(false); }}><span>{permissionOptions.find((option) => option.value === permission)?.label}</span></button></div>
+                  <div className="composer-left">
+                    <button className="composer-icon" title="添加上下文" aria-label="添加上下文" aria-expanded={composerToolsOpen} onClick={() => { setComposerToolsOpen((open) => !open); setOpenMenu(null); }}><Plus size={19} /></button>
+                    {goalText !== null && <button className="composer-pill" title={`${goalText}（点击清除目标）`} aria-label="清除当前会话目标" onClick={() => void clearGoal()}><Target size={13} /><span>{goalText}</span></button>}
+                    {planMode && <button className="composer-pill is-active" title="计划模式仅下一次提问生效（点击关闭）" aria-label="关闭计划模式" onClick={() => setPlanMode(false)}><Lightbulb size={13} /><span>计划模式</span></button>}
+                    <button className={`menu-trigger permission-trigger ${permission !== "ask" ? "permission-selected" : ""}`} title="命令权限" aria-label="命令权限" aria-expanded={openMenu === "permission"} onClick={() => { setOpenMenu(openMenu === "permission" ? null : "permission"); setComposerToolsOpen(false); }}><span>{permissionOptions.find((option) => option.value === permission)?.label}</span></button>
+                  </div>
                    <div className="composer-right"><button className="menu-trigger model-trigger" title="选择模型与推理强度" aria-label="选择模型与推理强度" aria-expanded={openMenu === "model"} onClick={() => setOpenMenu(openMenu === "model" ? null : "model")}><span className="model-status-dot" /><span>{model}</span><span className="intensity-label">{intensity}</span></button><button className={`send-button ${sending ? "stop-button" : ""}`} title={sending ? "停止执行" : `发送（${model}，${intensity}强度）`} aria-label={sending ? "停止执行" : "发送"} onClick={() => void (sending ? interruptChat() : runChat())} disabled={!sending && !input.trim() && !attachments.length}><>{sending ? <Square size={16} fill="currentColor" /> : <ArrowUp size={20} />}</></button></div>
                 </div>
               </div>
@@ -925,6 +1339,31 @@ function App() {
         </div>
       </section>
       </div>
+      {editProject && <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="编辑项目" onKeyDown={(event) => { if (event.key === "Escape") setEditProject(null); }}>
+        <div className="edit-project">
+          <div className="edit-project-header"><h2>编辑项目</h2><button className="icon-button" title="关闭" aria-label="关闭" onClick={() => setEditProject(null)}>×</button></div>
+          <div className="edit-project-name"><span className="edit-project-name-icon" aria-hidden="true"><FolderOpen size={16} /></span><input value={editProject.name} onChange={(event) => setEditProject((current) => current ? { ...current, name: event.target.value } : current)} aria-label="项目名称" placeholder="项目名称" /></div>
+          <div className="edit-project-label">源文件夹</div>
+          <div className="edit-project-folders">
+            {editProject.folders.map((folder) => <div className="edit-project-folder" key={folder}>
+              <span className="edit-project-folder-icon" aria-hidden="true"><FolderOpen size={16} /></span>
+              <span className="edit-project-folder-name">{folder.split(/[\\/]/).filter(Boolean).pop() || folder}</span>
+              <button type="button" aria-label={`移除文件夹 ${folder}`} title="移除文件夹" onClick={() => setEditProject((current) => current ? { ...current, folders: current.folders.filter((item) => item !== folder) } : current)}>×</button>
+            </div>)}
+            <button type="button" className="edit-project-add-folder" onClick={() => void addEditProjectFolder()}>
+              <span className="edit-project-folder-icon" aria-hidden="true"><FolderPlus size={16} /></span>
+              <span>添加文件夹</span>
+            </button>
+          </div>
+          <div className="edit-project-footer">
+            <button type="button" className="edit-project-remove" onClick={() => void removeProject(editProject.path)}>移除本地项目</button>
+            <div className="edit-project-footer-actions">
+              <button type="button" className="secondary-button" onClick={() => setEditProject(null)}>取消</button>
+              <button type="button" className="primary-button" onClick={() => void saveEditProject()}>保存</button>
+            </div>
+          </div>
+        </div>
+      </div>}
     </div>
   );
 }

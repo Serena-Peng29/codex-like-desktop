@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
@@ -15,7 +15,18 @@ try { process.loadEnvFile?.(envPath); } catch { /* .env is optional in packaged 
 type SidecarServerRequest = { id: number | string; method: string; params?: Record<string, unknown> };
 type SidecarNotification = { method: string; params?: Record<string, unknown> };
 type ThreadSummary = { id: string; preview?: string; name?: string | null; cwd?: string; updatedAt?: number; createdAt?: number; ephemeral?: boolean; status?: unknown };
-type ClientState = { projectPath?: string | null; activeThreadId?: string | null; unassignedThreadIds?: string[]; threadProjectPaths?: Record<string, string | null> };
+type ProjectMeta = { name?: string; folders?: string[] };
+type ClientState = {
+  projectPath?: string | null;
+  activeThreadId?: string | null;
+  unassignedThreadIds?: string[];
+  threadProjectPaths?: Record<string, string | null>;
+  threadDisplayNames?: Record<string, string>;
+  pinnedThreadIds?: string[];
+  projectMeta?: Record<string, ProjectMeta>;
+  pinnedProjects?: string[];
+  removedProjects?: string[];
+};
 
 function discoverNpmCodexBinary() {
   if (process.platform !== "win32") return undefined;
@@ -90,11 +101,28 @@ const allowedCommands = new Set(["node", "npm", "pnpm", "git", "cargo", "python"
 let activeThreadId: string | null = null;
 const unassignedThreadIds = new Set<string>();
 const threadProjectPaths = new Map<string, string | null>();
+const threadDisplayNames = new Map<string, string>();
+const pinnedThreadIds = new Set<string>();
+const projectMeta = new Map<string, ProjectMeta>();
+const pinnedProjects = new Set<string>();
+const removedProjects = new Set<string>();
 let activeTurn: { threadId: string; turnId?: string; output: string; usage: Record<string, number>; interruptRequested?: boolean; interruptSent?: boolean; resolve: (result: { output: string; usage: Record<string, number> }) => void; reject: (error: Error) => void } | null = null;
 
 function clientStatePath() { return join(app.getPath("userData"), "way2agi-state.json"); }
 function persistClientState() {
-  try { writeFileSync(clientStatePath(), JSON.stringify({ projectPath, activeThreadId, unassignedThreadIds: [...unassignedThreadIds], threadProjectPaths: Object.fromEntries(threadProjectPaths) } satisfies ClientState), "utf8"); } catch { /* state persistence is best effort */ }
+  try {
+    writeFileSync(clientStatePath(), JSON.stringify({
+      projectPath,
+      activeThreadId,
+      unassignedThreadIds: [...unassignedThreadIds],
+      threadProjectPaths: Object.fromEntries(threadProjectPaths),
+      threadDisplayNames: Object.fromEntries(threadDisplayNames),
+      pinnedThreadIds: [...pinnedThreadIds],
+      projectMeta: Object.fromEntries(projectMeta),
+      pinnedProjects: [...pinnedProjects],
+      removedProjects: [...removedProjects]
+    } satisfies ClientState), "utf8");
+  } catch { /* state persistence is best effort */ }
 }
 function loadClientState() {
   try {
@@ -105,8 +133,20 @@ function loadClientState() {
     for (const [threadId, path] of Object.entries(value.threadProjectPaths ?? {})) {
       if (threadId && (path === null || typeof path === "string")) threadProjectPaths.set(threadId, path);
     }
+    for (const [threadId, name] of Object.entries(value.threadDisplayNames ?? {})) {
+      if (threadId && typeof name === "string") threadDisplayNames.set(threadId, name);
+    }
+    for (const threadId of value.pinnedThreadIds ?? []) if (typeof threadId === "string" && threadId) pinnedThreadIds.add(threadId);
+    for (const [path, meta] of Object.entries(value.projectMeta ?? {})) {
+      if (!path || !meta || typeof meta !== "object") continue;
+      const folders = Array.isArray(meta.folders) ? meta.folders.filter((folder): folder is string => typeof folder === "string" && folder.length > 0) : undefined;
+      projectMeta.set(path, { ...(typeof meta.name === "string" && meta.name.trim() ? { name: meta.name } : {}), ...(folders?.length ? { folders } : {}) });
+    }
+    for (const path of value.pinnedProjects ?? []) if (typeof path === "string" && path) pinnedProjects.add(path);
+    for (const path of value.removedProjects ?? []) if (typeof path === "string" && path) removedProjects.add(path);
     for (const threadId of unassignedThreadIds) if (!threadProjectPaths.has(threadId)) threadProjectPaths.set(threadId, null);
     if (activeThreadId && threadProjectPaths.has(activeThreadId)) projectPath = threadProjectPaths.get(activeThreadId) ?? null;
+    if (projectPath && removedProjects.has(projectPath)) { projectPath = null; activeThreadId = null; }
   } catch { /* first launch or malformed state */ }
 }
 
@@ -165,7 +205,10 @@ function createWindow() {
   window.loadFile(renderer);
 }
 
-type TurnInput = { type: "text"; text: string } | { type: "localImage"; path: string };
+// Wire shapes mirror upstream `UserInput` (fixed commit 25a6e31): text items,
+// `localImage` for images read from disk, and `mention` as the upstream-blessed
+// way to reference arbitrary local files (there is no generic attachment item).
+type TurnInput = { type: "text"; text: string } | { type: "localImage"; path: string } | { type: "mention"; name: string; path: string };
 
 async function ensureActiveThread() {
   const cwd = projectPath ?? undefined;
@@ -260,7 +303,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("window:minimize", () => BrowserWindow.getFocusedWindow()?.minimize());
   ipcMain.handle("window:toggle-maximize", () => { const target = BrowserWindow.getFocusedWindow(); if (!target) return false; if (target.isMaximized()) target.unmaximize(); else target.maximize(); return target.isMaximized(); });
   ipcMain.handle("window:close", () => BrowserWindow.getFocusedWindow()?.close());
-  ipcMain.handle("app:state", async () => ({ projectPath, activeThreadId, unassignedThreadIds: [...unassignedThreadIds], threadProjectPaths: Object.fromEntries(threadProjectPaths), history: await listConversationHistory(), sidecar: sidecar.status, gateway: gatewayUrl, gatewayMode: gatewayIsRemote ? "remote" : "local" }));
+  ipcMain.handle("app:state", async () => ({ projectPath, activeThreadId, unassignedThreadIds: [...unassignedThreadIds], threadProjectPaths: Object.fromEntries(threadProjectPaths), threadDisplayNames: Object.fromEntries(threadDisplayNames), pinnedThreadIds: [...pinnedThreadIds], projectMeta: Object.fromEntries(projectMeta), pinnedProjects: [...pinnedProjects], removedProjects: [...removedProjects], history: await listConversationHistory(), sidecar: sidecar.status, gateway: gatewayUrl, gatewayMode: gatewayIsRemote ? "remote" : "local" }));
   ipcMain.handle("project:choose", async () => { const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] }); if (!result.canceled && result.filePaths[0]) { projectPath = result.filePaths[0]; activeThreadId = null; await sidecar.request("workspace/set", { path: projectPath }).catch(() => undefined); persistClientState(); } return projectPath; });
   ipcMain.handle("project:set", async (_event, path: string) => { if (typeof path !== "string" || !path.trim()) throw new Error("invalid_project_path"); projectPath = path; activeThreadId = null; await sidecar.request("workspace/set", { path: projectPath }).catch(() => undefined); persistClientState(); return projectPath; });
   ipcMain.handle("project:clear", () => { projectPath = null; activeThreadId = null; persistClientState(); return undefined; });
@@ -288,10 +331,28 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("chat:stream", (_event, input: TurnInput[], options?: { effort?: string; planMode?: boolean }) => runAppServerTurn(input, options));
   ipcMain.handle("chat:interrupt", () => interruptActiveTurn());
-  ipcMain.handle("chat:choose-files", async () => {
-    const result = await dialog.showOpenDialog({ properties: ["openFile", "multiSelections"], filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] }] });
+  ipcMain.handle("chat:choose-files", async (_event, mode?: "image" | "file") => {
+    const wantImages = mode !== "file";
+    const result = await dialog.showOpenDialog({
+      properties: ["openFile", "multiSelections"],
+      ...(wantImages ? { filters: [{ name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "bmp"] }] } : {})
+    });
     if (result.canceled) return [];
-    return result.filePaths.map((file) => ({ path: file, name: file.split(/[\\/]/).pop() ?? file, preview: imagePreview(file) }));
+    return result.filePaths.map((file) => {
+      const name = file.split(/[\\/]/).pop() ?? file;
+      const extension = file.split(".").pop()?.toLowerCase() ?? "";
+      const image = ["png", "jpg", "jpeg", "gif", "webp", "bmp"].includes(extension);
+      return { path: file, name, image, preview: image ? imagePreview(file) : undefined };
+    });
+  });
+  ipcMain.handle("project:choose-folders", async () => {
+    const result = await dialog.showOpenDialog({ properties: ["openDirectory", "multiSelections"] });
+    return result.canceled ? [] : result.filePaths;
+  });
+  ipcMain.handle("project:reveal", (_event, path: string) => {
+    if (typeof path !== "string" || !path.trim() || !existsSync(path)) throw new Error("invalid_project_path");
+    shell.showItemInFolder(path);
+    return undefined;
   });
   ipcMain.handle("chat:save-pasted-image", async (_event, dataUrl: string) => {
     if (typeof dataUrl !== "string" || !/^data:image\/(png|jpeg|jpg|gif|webp|bmp);base64,/i.test(dataUrl)) throw new Error("invalid_pasted_image");
@@ -308,6 +369,63 @@ app.whenReady().then(async () => {
     if (typeof objective !== "string" || !objective.trim()) throw new Error("invalid_goal");
     const threadId = await ensureActiveThread();
     return sidecar.request("thread/goal/set", { threadId, objective: objective.trim() });
+  });
+  ipcMain.handle("thread:goal-get", async () => {
+    if (!activeThreadId) return { goal: null };
+    return sidecar.request("thread/goal/get", { threadId: activeThreadId }).catch(() => ({ goal: null }));
+  });
+  ipcMain.handle("thread:goal-clear", async () => {
+    if (!activeThreadId) return { cleared: false };
+    return sidecar.request("thread/goal/clear", { threadId: activeThreadId }).catch(() => ({ cleared: false }));
+  });
+  ipcMain.handle("thread:set-name", (_event, threadId: string, name: string) => {
+    if (typeof threadId !== "string" || !threadId) throw new Error("invalid_thread_id");
+    if (typeof name !== "string") throw new Error("invalid_thread_name");
+    if (name.trim()) threadDisplayNames.set(threadId, name.trim()); else threadDisplayNames.delete(threadId);
+    persistClientState();
+    return Object.fromEntries(threadDisplayNames);
+  });
+  ipcMain.handle("thread:toggle-pin", (_event, threadId: string) => {
+    if (typeof threadId !== "string" || !threadId) throw new Error("invalid_thread_id");
+    if (pinnedThreadIds.has(threadId)) pinnedThreadIds.delete(threadId); else pinnedThreadIds.add(threadId);
+    persistClientState();
+    return [...pinnedThreadIds];
+  });
+  ipcMain.handle("thread:set-project", (_event, threadId: string, path: string | null) => {
+    if (typeof threadId !== "string" || !threadId) throw new Error("invalid_thread_id");
+    if (path !== null && (typeof path !== "string" || !path.trim())) throw new Error("invalid_project_path");
+    threadProjectPaths.set(threadId, path);
+    if (path) unassignedThreadIds.delete(threadId); else unassignedThreadIds.add(threadId);
+    persistClientState();
+    return undefined;
+  });
+  ipcMain.handle("project:set-meta", (_event, path: string, meta: { name?: string; folders?: string[] }) => {
+    if (typeof path !== "string" || !path.trim()) throw new Error("invalid_project_path");
+    const name = typeof meta?.name === "string" && meta.name.trim() ? meta.name.trim() : undefined;
+    const folders = Array.isArray(meta?.folders) ? meta.folders.filter((folder): folder is string => typeof folder === "string" && folder.length > 0) : [];
+    if (!name && !folders.length) projectMeta.delete(path); else projectMeta.set(path, { ...(name ? { name } : {}), ...(folders.length ? { folders } : {}) });
+    persistClientState();
+    return Object.fromEntries(projectMeta);
+  });
+  ipcMain.handle("project:toggle-pin", (_event, path: string) => {
+    if (typeof path !== "string" || !path.trim()) throw new Error("invalid_project_path");
+    if (pinnedProjects.has(path)) pinnedProjects.delete(path); else pinnedProjects.add(path);
+    persistClientState();
+    return [...pinnedProjects];
+  });
+  ipcMain.handle("project:remove", (_event, path: string) => {
+    if (typeof path !== "string" || !path.trim()) throw new Error("invalid_project_path");
+    // Only detach the project from the product's own metadata; nothing on disk
+    // is touched, per the requirement that removing never deletes user files.
+    removedProjects.add(path);
+    pinnedProjects.delete(path);
+    projectMeta.delete(path);
+    for (const [threadId, binding] of [...threadProjectPaths]) {
+      if (binding === path) { threadProjectPaths.set(threadId, null); unassignedThreadIds.add(threadId); }
+    }
+    if (projectPath === path) { projectPath = null; activeThreadId = null; }
+    persistClientState();
+    return undefined;
   });
   ipcMain.handle("diff:preview", async (_event, input: string) => { if (!projectPath) throw new Error("project_required"); const file = join(projectPath, "codex-like-demo.txt"); const before = existsSync(file) ? readFileSync(file, "utf8") : ""; const after = `${before}${before ? "\n" : ""}${input}\n`; await sidecar.request("files/diff", { path: file, before, after }).catch(() => undefined); return { path: file, before, after, status: before ? "modified" : "created" }; });
   ipcMain.handle("diff:apply", (_event, diff: { path: string; before: string; after: string }) => { if (!projectPath || !isWithinProject(diff.path, projectPath)) throw new Error("invalid_project_path"); writeFileSync(diff.path, diff.after, "utf8"); return undefined; });

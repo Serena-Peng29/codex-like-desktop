@@ -837,7 +837,6 @@ body, .app-window, .app-shell, .workspace, .workspace-body, .conversation-pane {
   .workspace { min-height: 0; }
   .topbar { min-height: 2.9rem; padding-inline: .75rem; }
   .topbar-title { max-width: 72%; }
-  .location-button { display: none; }
   .conversation-scroll { padding: .9rem .75rem 7.5rem; }
   .message-column { width: 100%; }
   .user-message { padding-left: 8%; }
@@ -847,3 +846,92 @@ body, .app-window, .app-shell, .workspace, .workspace-body, .conversation-pane {
   .empty-conversation .composer { min-height: 7.2rem; }
   .composer textarea { min-height: 3.7rem; }
 }
+
+/* Sidebar search, view menu, pinning, session/project menus, and dialogs. */
+.sidebar-section { position: relative; }
+.tiny-action.is-active { color: var(--accent); }
+.sidebar-flyout { position: absolute; top: 2.35rem; right: .45rem; z-index: 14; width: min(12rem, calc(100% - .9rem)); padding: .35rem; border: 1px solid var(--hairline); border-radius: .55rem; background: var(--surface-card); box-shadow: 0 .8rem 2rem rgb(0 0 0 / 42%); animation: menu-in 160ms ease-out; }
+.sidebar-flyout .menu-option { justify-content: space-between; font-size: .76rem; color: var(--text-secondary); }
+.sidebar-flyout .menu-option:hover { color: var(--text); }
+.sidebar-search { display: flex; align-items: center; gap: .4rem; margin: .1rem .1rem .45rem; padding: .32rem .55rem; border: 1px solid var(--hairline); border-radius: .45rem; background: var(--surface-bubble); color: var(--muted); }
+.sidebar-search input { flex: 1; min-width: 0; border: 0; outline: 0; color: var(--text); background: transparent; font-size: .76rem; }
+.sidebar-search input::placeholder { color: var(--quiet); }
+.sidebar-search button { display: grid; place-items: center; width: 1.3rem; height: 1.3rem; border-radius: .3rem; color: var(--muted); background: transparent; }
+.sidebar-search button:hover { color: var(--text); background: var(--badge); }
+
+.session-row-container { position: relative; display: flex; align-items: center; min-width: 0; }
+.session-row-container .session-row, .session-row-container .recent-session { width: auto; flex: 1 1 auto; min-width: 0; padding-right: 1.7rem; }
+.session-more { position: absolute; top: 50%; right: .3rem; z-index: 2; display: grid; width: 1.55rem; height: 1.55rem; place-items: center; border: 0; border-radius: .38rem; color: var(--muted); background: transparent; opacity: 0; pointer-events: none; transform: translateY(-50%) scale(.92); transition: opacity 140ms ease-out, transform 140ms ease-out, background 120ms ease-out, color 120ms ease-out; }
+.session-row-container:hover .session-more, .session-more:focus-visible, .session-more[aria-expanded="true"] { opacity: 1; pointer-events: auto; transform: translateY(-50%) scale(1); }
+.session-more:hover { color: var(--text); background: var(--badge); }
+.session-rename { width: 100%; min-width: 0; margin-inline: .15rem; padding: .34rem .5rem; border: 1px solid var(--chip); border-radius: .4rem; outline: 0; color: var(--text); background: var(--surface-bubble); font-size: .74rem; }
+.session-rename:focus { border-color: #3a3a3f; }
+
+.session-menu, .project-menu { position: absolute; top: calc(100% + .25rem); right: .3rem; z-index: 22; display: grid; min-width: 12.5rem; padding: .3rem; border: 1px solid var(--hairline); border-radius: .55rem; background: var(--surface-card); box-shadow: 0 .8rem 2rem rgb(0 0 0 / 42%); animation: menu-in 160ms ease-out; }
+.session-menu button, .project-menu button { display: grid; grid-template-columns: 1.1rem 1fr; align-items: center; gap: .5rem; width: 100%; min-height: 2.05rem; padding: .3rem .45rem; border: 0; border-radius: .4rem; color: var(--text-secondary); background: transparent; text-align: left; font-size: .74rem; }
+.session-menu button:hover, .project-menu button:hover { color: var(--text); background: var(--badge); }
+.session-menu button small, .project-menu button small { grid-column: 2; margin-left: auto; color: var(--quiet); font-size: .62rem; }
+.session-menu button span, .project-menu button span { display: inline-flex; align-items: center; }
+.session-menu-sub-wrap { position: relative; }
+.session-menu-sub { display: grid; gap: .05rem; margin: .1rem 0 .15rem; padding-left: 1.35rem; }
+.session-menu-sub button { grid-template-columns: 1rem 1fr; min-height: 1.85rem; font-size: .72rem; }
+.session-menu-sub button span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-menu-empty { padding: .3rem .45rem .35rem; color: var(--quiet); font-size: .68rem; }
+.project-menu-danger { color: var(--danger) !important; }
+.project-menu-danger:hover { color: var(--danger) !important; background: rgb(248 113 113 / 10%) !important; }
+
+.project-row-container .project-new-chat { right: 2.45rem; }
+.project-more { position: absolute; top: 50%; right: .35rem; z-index: 2; display: grid; width: 1.7rem; height: 1.7rem; place-items: center; border: 0; border-radius: .42rem; color: var(--text-secondary); background: var(--badge); opacity: 0; pointer-events: none; transform: translateY(-50%) scale(.9); transition: opacity 150ms ease-out, transform 150ms ease-out, background 120ms ease-out, color 120ms ease-out; }
+.project-row-container:hover .project-more, .project-more:focus-visible, .project-more[aria-expanded="true"] { opacity: 1; pointer-events: auto; transform: translateY(-50%) scale(1); }
+.project-more:hover { color: var(--text); background: var(--chip); }
+
+.pinned-section { margin-bottom: .4rem; padding-bottom: .45rem; border-bottom: 1px solid var(--hairline); }
+.pinned-group-name { display: flex; align-items: center; gap: .4rem; min-width: 0; padding: .3rem .5rem .2rem 1.05rem; color: var(--muted); font-size: .66rem; }
+.pinned-group-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.quick-panel { position: absolute; top: calc(100% + .3rem); right: .45rem; z-index: 45; display: grid; min-width: 13rem; padding: .3rem; border: 1px solid var(--hairline); border-radius: .55rem; background: var(--surface-card); box-shadow: 0 .8rem 2rem rgb(0 0 0 / 42%); animation: menu-in 160ms ease-out; }
+.quick-panel button { display: grid; grid-template-columns: 1.15rem 1fr auto; align-items: center; gap: .55rem; width: 100%; min-height: 2.2rem; padding: .35rem .55rem; border: 0; border-radius: .4rem; color: var(--text-secondary); background: transparent; text-align: left; font-size: .76rem; }
+.quick-panel button:hover { color: var(--text); background: var(--badge); }
+.quick-panel button span { display: inline-flex; align-items: center; }
+.quick-panel button small { color: var(--quiet); font-size: .62rem; }
+
+/* User attachments that are documents rather than images. */
+.attachment-chip.is-file { width: auto; min-width: 4.5rem; max-width: 12rem; gap: .4rem; padding-inline: .5rem; }
+.attachment-chip.is-file .attachment-placeholder { background: transparent; }
+.attachment-chip .attachment-name { overflow: hidden; color: var(--text-secondary); font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
+.user-files { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .45rem; }
+.user-file-chip { display: inline-flex; align-items: center; gap: .35rem; max-width: 16rem; padding: .3rem .55rem; border: 1px solid var(--hairline); border-radius: .4rem; color: var(--text-secondary); background: var(--pill); font-size: .68rem; }
+.user-file-chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Goal / plan badges in the composer footer (image-6 pill treatment). */
+.composer-pill { display: inline-flex; align-items: center; gap: .32rem; min-height: 1.85rem; max-width: 11rem; padding: .22rem .6rem; border: 0; border-radius: 999px; color: var(--accent); background: var(--chip); font-size: .68rem; }
+.composer-pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.composer-pill:hover { background: var(--badge); }
+
+/* Edit-project dialog (image-10). */
+.modal-overlay { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgb(0 0 0 / 52%); }
+.edit-project { width: min(30rem, calc(100vw - 4rem)); padding: 1rem 1.1rem 1.05rem; border: 1px solid var(--hairline); border-radius: .8rem; background: var(--surface-card); box-shadow: 0 1.2rem 3rem rgb(0 0 0 / 55%); }
+.edit-project-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: .8rem; }
+.edit-project-header h2 { margin: 0; color: var(--text); font-size: 1rem; font-weight: 650; }
+.edit-project-name { display: flex; align-items: center; gap: .45rem; padding: .1rem .5rem .1rem .1rem; border: 1px solid var(--chip); border-radius: .5rem; background: var(--surface-bubble); }
+.edit-project-name:focus-within { border-color: #3a3a3f; }
+.edit-project-name-icon { display: grid; place-items: center; width: 2.1rem; height: 2.1rem; border-radius: .4rem; color: var(--muted); background: var(--badge); }
+.edit-project-name input { flex: 1; min-width: 0; padding: .5rem 0; border: 0; outline: 0; color: var(--text); background: transparent; font-size: .84rem; }
+.edit-project-label { margin: .8rem 0 .4rem; color: var(--quiet); font-size: .68rem; }
+.edit-project-folders { display: grid; gap: .1rem; padding: .3rem; border: 1px solid var(--hairline); border-radius: .55rem; }
+.edit-project-folder { display: flex; align-items: center; gap: .55rem; min-height: 2.2rem; padding: .25rem .45rem; border-radius: .4rem; }
+.edit-project-folder:hover { background: var(--badge); }
+.edit-project-folder-icon { display: grid; place-items: center; color: var(--muted); }
+.edit-project-folder-name { min-width: 0; flex: 1; overflow: hidden; color: var(--text-secondary); font-size: .78rem; text-overflow: ellipsis; white-space: nowrap; }
+.edit-project-folder button { display: grid; place-items: center; width: 1.5rem; height: 1.5rem; border: 0; border-radius: .3rem; color: var(--muted); background: transparent; font-size: .95rem; }
+.edit-project-folder button:hover { color: var(--danger); background: rgb(248 113 113 / 10%); }
+.edit-project-add-folder { display: flex; align-items: center; gap: .55rem; width: 100%; min-height: 2.3rem; padding: .3rem .45rem; border: 0; border-top: 1px solid var(--hairline); border-radius: 0 0 .4rem .4rem; color: var(--text-secondary); background: transparent; font-size: .78rem; text-align: left; }
+.edit-project-add-folder:hover { color: var(--text); background: var(--badge); }
+.edit-project-footer { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-top: .9rem; }
+.edit-project-footer-actions { display: flex; align-items: center; gap: .45rem; }
+.edit-project-remove { padding: .45rem .7rem; border: 0; border-radius: .42rem; color: var(--danger); background: rgb(248 113 113 / 10%); font-size: .76rem; font-weight: 600; }
+.edit-project-remove:hover { background: rgb(248 113 113 / 16%); }
+
+/* User messages hug their content: compact right-aligned bubble, never a
+   full-width card (image-7). */
+.user-message .message-content { flex: 0 0 auto; width: auto; max-width: min(70%, 44rem); }

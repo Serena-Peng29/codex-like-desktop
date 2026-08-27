@@ -44,6 +44,8 @@
 - 图片消息支持缩略图预览且不显示文件名；纯图片请求可直接发送，执行中发送按钮切换为停止并调用上游 `turn/interrupt`。
 - 图片附件发送链路补齐：主进程为文件选择生成预览 data URL，用户消息保留缩略图；停止请求使用 `threadId` 与已建立的 `turnId`。
 - 按 `docs/ui.md` 完成 Chat-first UI 重设计：桌面侧栏收窄至约 300px、会话头部压缩为轻量 52px、用户消息改为紧凑深灰气泡、助手回复增加轻量品牌行且执行过程默认折叠，文件编辑摘要保持直接可见，Composer 默认约 120px 且支持窄屏布局；未改动聊天数据、流式、审批或文件编辑逻辑。
+- 按 `docs/button_function.md`（v2，已与使用者逐条对齐）实现侧栏与 Composer 交互八项：①工作区标题行新增会话名称搜索框与视图菜单（分组方式 按工作区/单列表、排序方式 手动排序/最近更新，选择持久化到 localStorage）；②会话行悬停 ⋯ 菜单支持置顶（侧栏新增“置顶”分区）、行内重命名（展示名独立于线程 ID 持久化）、移至项目子菜单；③删除会话区顶部“打开位置”按钮及其相邻图标；④Composer 添加菜单改为“文件/目标/计划模式”：文件支持任意本地文件（上游 `UserInput::Mention` 通道）与图片（`localImage`），目标取当前输入框文字调用 `thread/goal/set` 并在输入框显示可清除徽标，计划模式按下一次提问生效发送 `turn/start.collaborationMode: plan` 后自动退出并显示徽标；⑤用户消息气泡收紧为内容自适应（≤70% 宽）右对齐；⑥助手回复完成时间在完成瞬间定格，历史回放无真实时间时留空不再冒充；⑦项目行悬停新增 ⋯ 菜单（置顶、编辑项目弹窗[名称+源文件夹列表+添加文件夹+移除本地项目]、在资源管理器中打开、移除项目仅解除绑定不删磁盘）；⑧窗口右上角新增快捷面板入口，仅显示当前可用项（本期为“文件”）。
+- 主进程新增持久化字段（threadDisplayNames、pinnedThreadIds、projectMeta、pinnedProjects、removedProjects）及对应 IPC（thread:set-name/toggle-pin/set-project、project:set-meta/toggle-pin/remove/choose-folders/reveal、thread:goal-get/goal-clear、chat:choose-files 按 image/file 模式）；协议核验确认固定上游 25a6e31 的 `thread/goal/set|get|clear` 非实验方法、`turn/start.collaborationMode` 为实验字段且 initialize 已声明 `capabilities.experimentalApi: true`；`protocol-schema-check` 清单补充三个 goal 方法锁定上游兼容。
 
 ## 尚未完成
 
@@ -90,7 +92,11 @@
 - `npm run typecheck`、`npm test`、`npm run startup-check`、`npm run protocol-schema-check`：通过；图片发送、纯图片提交和 `turn/interrupt` 接口完成编译与协议校验。
 - `npm run typecheck`：通过；Chat-first UI 重设计已完成 TypeScript 编译和 renderer 构建。
 - `npm run typecheck`：通过；Figma 配色替换（仅颜色层）已完成 TypeScript 编译和 renderer 构建（60.40 kB CSS）。
+- `npm run typecheck`、`npm test`（2 文件 4 用例）、`npm run startup-check`、`npm run protocol-schema-check`：通过；button_function.md 八项交互与协议扩展已完成编译、自动化测试、产物检查和 mock sidecar 握手（CSS 69.35 kB）。
+- 协议线材冒烟：对 mock sidecar 实发 `thread/goal/set|get|clear`、携带 `collaborationMode: plan` 与 `mention` 输入项的 `turn/start` 及 `capabilities.experimentalApi` 握手报文，JSONL 收发格式全部正确；真实 sidecar 上的 goal/plan 回归仍待 sidecar 构建后执行。
+- 本机启动冒烟：清空 `ELECTRON_RUN_AS_NODE` 后 Electron 主进程与 renderer 可正常拉起；当前 shell 沙箱导致 sidecar 子进程 `spawn UNKNOWN`（与本次改动无关，spawn 逻辑未变动），窗口内交互验证待正常桌面环境复测。
 - 未解决：Figma 稿中未出现的交互态（hover、focus、disabled）按调色板就近派生灰阶；已隐藏的旧欢迎区 chips/recent-prompts 残留少量旧蓝色字面量，因当前不渲染未清理。
+- 未解决：button_function.md 中“手动排序”仅提供选项与持久化，拖拽排序另立任务；非图片文件走上游 `Mention` 引用通道（协议无通用附件类型），真实 sidecar 对 mention 的读取行为待回归；快捷面板后续随新能力逐项补入。
 - `npm test`：通过；2 个测试文件、4 个测试。
 - `npm run startup-check`：通过；构建产物与 mock sidecar 握手正常。
 - Playwright Chromium 缺少 bundled executable；改用本机 Chrome 完成 1440x900 与 390x844 截图核对，确认侧栏、轻量 Header、欢迎区和 Composer 无溢出。

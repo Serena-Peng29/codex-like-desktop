@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 
 const root = "vendor/codex/codex-rs/app-server-protocol/schema/json";
 const expected = {
-  ClientRequest: ["InitializeRequest", "Thread/startRequest", "Turn/startRequest", "Fs/readFileRequest", "Fs/writeFileRequest"],
+  ClientRequest: ["InitializeRequest", "Thread/startRequest", "Turn/startRequest", "Thread/goal/setRequest", "Thread/goal/getRequest", "Thread/goal/clearRequest", "Fs/readFileRequest", "Fs/writeFileRequest"],
   ServerRequest: ["Item/commandExecution/requestApprovalRequest", "Item/fileChange/requestApprovalRequest"],
   ServerNotification: ["Thread/startedNotification", "Item/agentMessage/deltaNotification", "Turn/completedNotification"]
 };
