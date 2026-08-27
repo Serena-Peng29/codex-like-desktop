@@ -30,3 +30,6 @@ AGENTS.md
 PROGRESS.md
 agent 折腾日志_20260825.docx
 docs/
+
+# Scratch demo workspace (own node_modules/dist), keep untracked
+tool-calls-3-demo/

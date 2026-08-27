@@ -29,6 +29,21 @@
 - 项目新建会话操作改为项目行悬停或键盘聚焦时淡入的右侧覆盖按钮，隐藏时不占固定布局空间；点击后复用当前项目路径创建会话。
 - 修复项目组被长会话标题撑宽导致新建按钮定位到侧栏外的问题；项目列表、项目组和会话区补充 `min-width: 0` 约束。
 - 新建会话按钮使用紧凑的图标操作样式，悬停时提供独立反馈；项目行悬停不再显示存储路径 tooltip。
+- 修复会话与项目绑定：持久化 `threadId -> projectPath | null` 映射；项目内/无项目新建会话显式记录归属，加载历史会话同步工作区；旧 `unassignedThreadIds` 状态自动迁移，sidecar 返回的 `cwd` 不再覆盖显式无项目绑定。
+- 修复对话渲染顺序：助手消息按事件顺序保留文本、推理和多个工具区块；历史回放不再丢弃工具条目；补充基础 Markdown、列表、行内代码和代码块渲染。
+- 按服务端 `itemId` 拆分连续助手文本，并按 `itemId` 更新工具输出/完成态，避免多次命令或多段回复互相覆盖。
+- 优化完成态交互：发送后清空输入框；完成时清除所有流式光标；最终答案默认独立展示，推理与工具过程收拢为可展开的执行过程，长过程/参数/输出在固定高度内滚动。
+- 文件编辑工具采用可展开 Diff 卡片：显示编辑状态、文件数量及增删行数，按上游 `fileChange.changes` 语义着色补丁；完成后的最终回答下方汇总本轮实际编辑文件。
+- 修复文件编辑行数展示：上游 `add`/`delete` 事件携带的是内容快照而非统一 diff，现按 `kind` 统计非空内容行；无法从更新事件恢复旧版本时明确显示“内容更新”，不再误报 `+0 / -0`。
+- 修复通用工具卡片遗漏：`item/completed` 缺少对应 `item/started` 时补建工具区块；命令、MCP、动态工具、网页搜索、子代理及图片生成/查看均使用同一可展开卡片，并保留失败状态。
+- 文件编辑 Diff 采用行级预览：新增行绿色、删除行红色并显示行号；最终文件汇总支持悬停、键盘聚焦或点击打开同一份差异预览。
+- 执行过程补充工具批次折叠层：连续工具按批次收拢，批次内再展开单个工具；命令工具使用带复制按钮、命令提示符和滚动输出的 Shell 面板展示。
+- 助手回复完成后的底部状态改为复制图标；点击可复制最终回复文本，生成期间仍显示进行状态。
+- 流式回复底部状态改为“思考中”加光标；完成后复制图标右侧显示本条回复完成时间。
+- 工具卡片、工具状态和最终文件变更汇总统一使用 Harness 灰阶；仅 Diff 内容保留红色删除/绿色新增语义高亮。
+- 图片消息支持缩略图预览且不显示文件名；纯图片请求可直接发送，执行中发送按钮切换为停止并调用上游 `turn/interrupt`。
+- 图片附件发送链路补齐：主进程为文件选择生成预览 data URL，用户消息保留缩略图；停止请求使用 `threadId` 与已建立的 `turnId`。
+- 按 `docs/ui.md` 完成 Chat-first UI 重设计：桌面侧栏收窄至约 300px、会话头部压缩为轻量 52px、用户消息改为紧凑深灰气泡、助手回复增加轻量品牌行且执行过程默认折叠，文件编辑摘要保持直接可见，Composer 默认约 120px 且支持窄屏布局；未改动聊天数据、流式、审批或文件编辑逻辑。
 
 ## 尚未完成
 
@@ -68,6 +83,19 @@
 - `npm run build:all`、`npm test`：通过；默认项目展开规则和统一文件夹图标已编译验证。
 - `npm run build:all`、`npm test`、`npm run startup-check`：通过；项目行新建会话按钮的悬停/聚焦显示规则已编译验证。
 - Electron 真实窗口验证：悬停项目行后 `.project-new-chat` 计算样式为 `opacity: 1`、`pointer-events: auto`，按钮矩形位于项目行右侧可视区域。
+- `npm run typecheck`、`npm test`、`npm run startup-check`：通过；会话项目绑定修复已完成构建、自动化测试和 mock sidecar 启动检查。
+- `npm run typecheck`、`npm test`、`npm run startup-check`：通过；对话顺序和 Markdown 渲染修复已完成构建、自动化测试和 mock sidecar 启动检查。
+- `npm run typecheck`、`npm test`、`npm run startup-check`、`npm run protocol-schema-check`：通过；文件新增/删除内容快照的行数统计与上游 `PatchChangeKind` 语义一致，`git diff --check` 通过。
+- `npm run typecheck`、`npm test`、`npm run startup-check`：通过；通用工具在仅收到 `item/completed` 事件时会补建执行过程卡片，避免工具记录丢失。
+- `npm run typecheck`、`npm test`、`npm run startup-check`、`npm run protocol-schema-check`：通过；图片发送、纯图片提交和 `turn/interrupt` 接口完成编译与协议校验。
+- `npm run typecheck`：通过；Chat-first UI 重设计已完成 TypeScript 编译和 renderer 构建。
+- `npm run typecheck`：通过；Figma 配色替换（仅颜色层）已完成 TypeScript 编译和 renderer 构建（60.40 kB CSS）。
+- 未解决：Figma 稿中未出现的交互态（hover、focus、disabled）按调色板就近派生灰阶；已隐藏的旧欢迎区 chips/recent-prompts 残留少量旧蓝色字面量，因当前不渲染未清理。
+- `npm test`：通过；2 个测试文件、4 个测试。
+- `npm run startup-check`：通过；构建产物与 mock sidecar 握手正常。
+- Playwright Chromium 缺少 bundled executable；改用本机 Chrome 完成 1440x900 与 390x844 截图核对，确认侧栏、轻量 Header、欢迎区和 Composer 无溢出。
+
+- 按 Figma 视觉稿（file `V8YOp4PVIcLWaXCagVngVm` node `6-4`）仅替换桌面端配色：重构 `styles.css` 底部 token 块为画布 `#121214`、侧栏/标题栏 `#171719`、输入框 `#212122`、卡片 `#1f1f21`、用户气泡 `#161618`、边框统一 `#242428`，文字四级 `#e4e4e7/#a1a1aa/#8e8e93/#515154`；全站移除旧蓝/青色系，新增唯一强调橙 `#e55c36`（流式光标、审批卡、选中态）与状态红绿 `#34d399/#f87171`（diff 增删行与计数）；不改布局、字号和组件结构。
 
 ## 更新规则
 
