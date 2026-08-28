@@ -6,7 +6,7 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSy
 import { homedir } from "node:os";
 import { delimiter, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { expandLocalFileInputs, type TurnInput } from "./turn-input.js";
+import { buildTurnInputItems, type TurnInput } from "./turn-input.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -102,6 +102,42 @@ const gatewayModel = process.env.MODEL ?? "gpt-4o-mini";
 const approvals = new Map<string, { command: string; cwd: string }>();
 const zhCollator = new Intl.Collator(["zh", "en"], { sensitivity: "base", numeric: true });
 const allowedCommands = new Set(["node", "npm", "pnpm", "git", "cargo", "python", "python3", "echo"]);
+// Upstream server requests whose response envelope the desktop can produce.
+// Anything not listed here would silently stall the turn if it ever appears.
+const serverRequestAwaitingUser = new Set([
+  "item/commandExecution/requestApproval",
+  "item/fileChange/requestApproval",
+  "item/permissions/requestApproval",
+  "item/tool/requestUserInput",
+  "mcpServer/elicitation/request"
+]);
+const approvalDecisions = new Set(["accept", "acceptForSession", "decline", "cancel"]);
+
+// Validate and shape the client response per upstream v2 response structs:
+// command/fileChange approvals take `{ decision }`, permission approvals take
+// the granted profile (an empty profile denies), user-input and elicitation
+// requests take their own envelopes.
+function approvalResponseFor(method: string, payload: unknown): Record<string, unknown> {
+  if (method === "item/permissions/requestApproval") {
+    const { permissions, scope } = (payload ?? {}) as { permissions?: unknown; scope?: unknown };
+    if (!permissions || typeof permissions !== "object" || Array.isArray(permissions)) throw new Error("invalid_approval_permissions");
+    if (scope !== "turn" && scope !== "session") throw new Error("invalid_approval_scope");
+    return { permissions, scope };
+  }
+  if (method === "item/tool/requestUserInput") {
+    const { answers } = (payload ?? {}) as { answers?: unknown };
+    if (!answers || typeof answers !== "object" || Array.isArray(answers)) throw new Error("invalid_user_input_answers");
+    return { answers };
+  }
+  if (method === "mcpServer/elicitation/request") {
+    const { action, content } = (payload ?? {}) as { action?: unknown; content?: unknown };
+    if (action !== "accept" && action !== "decline" && action !== "cancel") throw new Error("invalid_elicitation_action");
+    return { action, content: content ?? null };
+  }
+  const { decision } = (payload ?? {}) as { decision?: unknown };
+  if (typeof decision !== "string" || !approvalDecisions.has(decision)) throw new Error("invalid_approval_decision");
+  return { decision };
+}
 let activeThreadId: string | null = null;
 const unassignedThreadIds = new Set<string>();
 // Threads the user explicitly moved out of every project ("不使用项目"). Healing
@@ -269,7 +305,7 @@ async function runAppServerTurn(input: TurnInput[], options?: { effort?: string;
     try {
       return await new Promise<{ output: string; usage: Record<string, number> }>((resolvePromise, reject) => {
         activeTurn = { threadId: activeThreadId!, output: "", usage: {}, resolve: resolvePromise, reject };
-        void sidecar.request("turn/start", { threadId: activeThreadId, ...(cwd ? { cwd, sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd] } } : {}), approvalPolicy: "on-request", effort: options?.effort ?? "medium", ...(options?.planMode ? { collaborationMode: { mode: "plan", settings: { model: gatewayModel, reasoning_effort: "medium", developer_instructions: null } } } : {}), input: expandLocalFileInputs(input) }).then((result) => {
+        void sidecar.request("turn/start", { threadId: activeThreadId, ...(cwd ? { cwd, sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd] } } : {}), approvalPolicy: "on-request", effort: options?.effort ?? "medium", ...(options?.planMode ? { collaborationMode: { mode: "plan", settings: { model: gatewayModel, reasoning_effort: "medium", developer_instructions: null } } } : {}), input: buildTurnInputItems(input) }).then((result) => {
           const turn = (result as { turn?: { id?: string } } | null)?.turn;
           if (activeTurn && turn?.id) {
             activeTurn.turnId = turn.id;
@@ -317,7 +353,9 @@ app.whenReady().then(async () => {
   }
   sidecar.setRequestHandler((request) => {
     const payload = { requestId: request.id, method: request.method, params: request.params ?? {} };
-    if (request.method === "item/commandExecution/requestApproval") mainWindow?.webContents.send("app-server:approval", payload);
+    // Every server-initiated request that can only proceed with a user answer
+    // must reach the approval UI; an unanswered request blocks the turn forever.
+    if (serverRequestAwaitingUser.has(request.method)) mainWindow?.webContents.send("app-server:approval", payload);
     // Keep server-initiated tool requests observable to the renderer while
     // retaining the approval-specific channel used by the existing inspector.
     mainWindow?.webContents.send("app-server:request", payload);
@@ -500,7 +538,11 @@ app.whenReady().then(async () => {
   ipcMain.handle("diff:apply", (_event, diff: { path: string; before: string; after: string }) => { if (!projectPath || !isWithinProject(diff.path, projectPath)) throw new Error("invalid_project_path"); writeFileSync(diff.path, diff.after, "utf8"); return undefined; });
   ipcMain.handle("command:request", (_event, command: string) => { if (!projectPath) throw new Error("project_required"); parseApprovedCommand(command); const approvalId = randomUUID(); approvals.set(approvalId, { command, cwd: projectPath }); return { approvalId, command, cwd: projectPath, reason: "本地命令需要用户确认" }; });
   ipcMain.handle("command:execute", (_event, approvalId: string) => new Promise((resolvePromise) => { const approval = approvals.get(approvalId); if (!approval) return resolvePromise({ stdout: "", stderr: "approval_not_found", code: 1 }); approvals.delete(approvalId); let executable: string, args: string[]; try { [executable, args] = parseApprovedCommand(approval.command); } catch (error) { return resolvePromise({ stdout: "", stderr: error instanceof Error ? error.message : "command_not_allowed", code: 1 }); } const child = spawn(executable, args, { cwd: approval.cwd, windowsHide: true, shell: false }); let stdout = "", stderr = ""; child.stdout.on("data", (chunk) => stdout += chunk); child.stderr.on("data", (chunk) => stderr += chunk); child.on("error", (error) => resolvePromise({ stdout, stderr: error.message, code: 1 })); child.on("close", (code) => resolvePromise({ stdout, stderr, code: code ?? 1 })); }));
-  ipcMain.handle("app-server:approval-response", (_event, requestId: number | string, decision: "accept" | "decline" | "cancel") => { if (typeof requestId !== "number" && typeof requestId !== "string") throw new Error("invalid_approval_request_id"); if (!["accept", "decline", "cancel"].includes(decision)) throw new Error("invalid_approval_decision"); sidecar.respond(requestId, { decision }); });
+  ipcMain.handle("app-server:approval-response", (_event, requestId: number | string, method: string, payload: unknown) => {
+    if (typeof requestId !== "number" && typeof requestId !== "string") throw new Error("invalid_approval_request_id");
+    if (typeof method !== "string" || !serverRequestAwaitingUser.has(method)) throw new Error("invalid_approval_method");
+    sidecar.respond(requestId, approvalResponseFor(method, payload));
+  });
   createWindow();
 });
 

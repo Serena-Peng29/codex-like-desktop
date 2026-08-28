@@ -40,7 +40,7 @@ contextBridge.exposeInMainWorld("desktop", {
     ipcRenderer.on("app-server:approval", handler);
     return () => ipcRenderer.removeListener("app-server:approval", handler);
   },
-  respondApproval: (requestId: number | string, decision: "accept" | "decline" | "cancel") => ipcRenderer.invoke("app-server:approval-response", requestId, decision),
+  respondApproval: (requestId: number | string, method: string, payload: Record<string, unknown>) => ipcRenderer.invoke("app-server:approval-response", requestId, method, payload),
   onMessageDelta: (listener: (event: { threadId?: string; turnId?: string; itemId?: string; delta: string }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, payload: { threadId?: string; turnId?: string; itemId?: string; delta: string }) => listener(payload);
     ipcRenderer.on("app-server:message-delta", handler);

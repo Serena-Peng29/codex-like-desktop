@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, FilePenLine, FileText, Folder, FolderOpen, FolderPlus, Lightbulb, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, PanelRightOpen, Paperclip, Pencil, Pin, PinOff, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
+import { removeUtf8Spans, sliceUtf8ByByteRange } from "../turn-input.js";
 import "./styles.css";
 
 const brandFavicon = new URL("./brand-favicon.png", import.meta.url).href;
@@ -137,7 +138,84 @@ function FileCodeView({ name, content }: { name: string; content: string }) {
   );
 }
 type Diff = { path: string; before: string; after: string; status: string };
-type Approval = { approvalId: string; command: string; cwd: string; reason: string; source?: "local" | "app-server"; requestId?: number | string };
+type ApprovalKind = "command" | "fileChange" | "permissions" | "userInput" | "elicitation";
+type Approval = {
+  approvalId: string;
+  command: string;
+  cwd: string;
+  reason?: string;
+  source?: "local" | "app-server";
+  requestId?: number | string;
+  method?: string;
+  kind: ApprovalKind;
+  detail?: string;
+  requestedPermissions?: Record<string, unknown>;
+};
+// Card headlines per approval kind; response envelopes are per method and are
+// built by approvalPayload.
+const approvalWarningForKind: Record<ApprovalKind, string> = {
+  command: "Codex 请求执行命令，需要你的确认",
+  fileChange: "Codex 请求修改工作区外的文件",
+  permissions: "Codex 请求额外的沙箱权限",
+  userInput: "工具请求补充输入",
+  elicitation: "MCP 服务器请求输入"
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function summarizePermissions(permissions: unknown) {
+  if (!isRecord(permissions)) return "请求未明确列出权限";
+  const network = isRecord(permissions.network) ? permissions.network : null;
+  const fileSystem = isRecord(permissions.fileSystem) ? permissions.fileSystem : isRecord(permissions.file_system) ? permissions.file_system : null;
+  const parts: string[] = [];
+  if (network) parts.push(network.enabled === false ? "网络访问（拒绝）" : "网络访问");
+  const read = Array.isArray(fileSystem?.read) ? fileSystem.read.length : 0;
+  const write = Array.isArray(fileSystem?.write) ? fileSystem.write.length : 0;
+  if (read) parts.push(`读取 ${read} 个路径`);
+  if (write) parts.push(`写入 ${write} 个路径`);
+  return parts.length ? parts.join("、") : "请求未明确列出权限";
+}
+
+// Build the response payload for one user decision, mirroring upstream
+// response structs per approval kind.
+function approvalPayload(approval: Approval, action: "accept" | "session" | "decline" | "cancel"): Record<string, unknown> {
+  switch (approval.kind) {
+    case "permissions": {
+      const granted = action === "accept" || action === "session" ? (approval.requestedPermissions ?? {}) : {};
+      return { permissions: granted, scope: action === "session" ? "session" : "turn" };
+    }
+    case "userInput":
+      return { answers: {} };
+    case "elicitation":
+      return { action: action === "accept" ? "accept" : "cancel", content: null };
+    default:
+      return { decision: action === "accept" ? "accept" : action === "session" ? "acceptForSession" : action === "decline" ? "decline" : "cancel" };
+  }
+}
+
+// Map an upstream server request to an actionable approval card; requests we
+// cannot render still surface (with a cancel) instead of stalling the turn.
+function approvalFromServerRequest(request: { requestId: number | string; method: string; params: Record<string, unknown> }): Approval | null {
+  const params = request.params ?? {};
+  const reason = typeof params.reason === "string" && params.reason ? params.reason : undefined;
+  const base = { approvalId: String(request.requestId), requestId: request.requestId, source: "app-server" as const, method: request.method, reason, command: "", cwd: "" };
+  switch (request.method) {
+    case "item/commandExecution/requestApproval":
+      return { ...base, kind: "command", command: typeof params.command === "string" && params.command ? params.command : "Codex 请求执行一项命令", cwd: typeof params.cwd === "string" && params.cwd ? params.cwd : "当前项目目录" };
+    case "item/fileChange/requestApproval":
+      return { ...base, kind: "fileChange", command: "Codex 请求修改文件", detail: typeof params.grantRoot === "string" && params.grantRoot ? `请求写入目录：${params.grantRoot}` : undefined, cwd: "当前项目目录" };
+    case "item/permissions/requestApproval":
+      return { ...base, kind: "permissions", command: "Codex 请求额外权限", detail: summarizePermissions(params.permissions), cwd: typeof params.cwd === "string" && params.cwd ? params.cwd : "", requestedPermissions: isRecord(params.permissions) ? params.permissions : {} };
+    case "item/tool/requestUserInput":
+      return { ...base, kind: "userInput", command: "工具请求补充输入", detail: displayValue(params) };
+    case "mcpServer/elicitation/request":
+      return { ...base, kind: "elicitation", command: typeof params.message === "string" && params.message ? params.message : "MCP 服务器请求输入", detail: displayValue(params) };
+    default:
+      return null;
+  }
+}
 type Permission = "ask" | "auto" | "full";
 type HistoryEntry = { id: string; preview?: string; name?: string | null; cwd?: string; updatedAt?: number; createdAt?: number; ephemeral?: boolean; status?: unknown };
 type ToolCall = { id: string; sourceId?: string; name: string; args: unknown; result: string; status: "running" | "done" | "failed" };
@@ -246,12 +324,39 @@ const upstreamImageMarker = /^<\/?image\b/;
 // Upstream folds local attachments into a markdown preamble when persisting a
 // user message; the real request follows the "My request" heading.
 const upstreamPreambleHeader = "# Files mentioned by the user";
+// Legacy desktop builds inlined attachment contents; those blocks must render
+// as chips instead of raw file dumps.
+const legacyAttachmentHeader = /^\[Attached local file:[^\]]*\][ \t]*$/gm;
+const legacyInlineBlock = /<(?:file|binary)[^>]*>[\s\S]*?<\/(?:file|binary)>/g;
 
-function userTextItems(item: Record<string, unknown>) {
-  const content = Array.isArray(item.content) ? item.content : [];
-  return content.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && (entry as Record<string, unknown>).type === "text"))
-    .map((entry) => typeof entry.text === "string" ? entry.text : "")
-    .filter((text) => !upstreamImageMarker.test(text.trim()));
+function isImageExtension(path: string) {
+  const extension = path.split(".").pop()?.toLowerCase() ?? "";
+  return upstreamImageExtensions.includes(extension);
+}
+
+// Extract attachments carried by upstream `text_elements` byte-range spans and
+// remove those spans (plus the attachment header line) from the display body.
+function splitTextElementAttachments(text: string, elements: unknown[]): { files: UserImage[]; body: string } {
+  const valid = (Array.isArray(elements) ? elements : []).filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object"));
+  if (!valid.length) return { files: [], body: text };
+  const files: UserImage[] = [];
+  const spans: Array<{ start: number; end: number }> = [];
+  for (const entry of valid) {
+    const range = (entry.byteRange ?? entry.byte_range) as { start?: unknown; end?: unknown } | undefined;
+    const start = typeof range?.start === "number" ? range.start : Number.NaN;
+    const end = typeof range?.end === "number" ? range.end : Number.NaN;
+    const path = sliceUtf8ByByteRange(text, start, end);
+    if (!path) continue;
+    const name = typeof entry.placeholder === "string" && entry.placeholder ? entry.placeholder : path.split(/[\\/]/).pop() ?? path;
+    files.push({ path, name, image: isImageExtension(path) });
+    spans.push({ start, end });
+  }
+  const body = removeUtf8Spans(text, spans).replace(/^[ \t]*Attached files:[ \t]*$\n?/m, "").replace(/\n{3,}/g, "\n\n").trim();
+  return { files, body };
+}
+
+function stripLegacyInlineAttachments(text: string) {
+  return text.replace(legacyInlineBlock, "").replace(legacyAttachmentHeader, "").replace(/\n{3,}/g, "\n\n");
 }
 
 type UpstreamAttachments = { images: UserImage[]; files: UserImage[]; body: string };
@@ -269,9 +374,7 @@ function splitUpstreamAttachments(text: string): UpstreamAttachments {
     const name = match[1].trim();
     const path = match[2].trim();
     if (!name || !path) continue;
-    const extension = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
-    const entry: UserImage = { path, name };
-    if (upstreamImageExtensions.includes(extension)) entry.image = true; else entry.image = false;
+    const entry: UserImage = { path, name, image: isImageExtension(name) };
     (entry.image ? images : files).push(entry);
   }
   let body = text;
@@ -285,9 +388,65 @@ function splitUpstreamAttachments(text: string): UpstreamAttachments {
   return { images, files, body: body.trim() };
 }
 
+// Single source of truth for restoring a persisted user message: display body
+// plus every attachment, whether it traveled as a text element, a localImage
+// item, a legacy mention item, or inside an old preamble.
+function userMessageParts(item: Record<string, unknown>): UpstreamAttachments {
+  const content = Array.isArray(item.content) ? item.content : [];
+  const consumedIndex = new Set<string>();
+  const images: UserImage[] = [];
+  const files: UserImage[] = [];
+  const bodies: string[] = [];
+  const preambleImages: UserImage[] = [];
+  const preambleFiles: UserImage[] = [];
+  let imageIndex = 0;
+  for (const entry of content) {
+    if (!entry || typeof entry !== "object") continue;
+    const value = entry as Record<string, unknown>;
+    if (value.type === "text" && typeof value.text === "string") {
+      if (upstreamImageMarker.test(value.text.trim())) continue;
+      const elementized = splitTextElementAttachments(value.text, value.text_elements);
+      const cleaned = splitUpstreamAttachments(stripLegacyInlineAttachments(elementized.body));
+      // Elements and preambles may describe the same attachment as an image
+      // item elsewhere in the content list; let later entries claim names.
+      preambleFiles.push(...cleaned.files);
+      preambleImages.push(...cleaned.images);
+      if (cleaned.body.trim()) bodies.push(cleaned.body.trim());
+      continue;
+    }
+    if (value.type === "localImage" && typeof value.path === "string") {
+      const key = normalizedPathKey(value.path);
+      const named = preambleImages.findIndex((candidate, index) => !consumedIndex.has(`image-${index}`) && normalizedPathKey(candidate.path) === key);
+      if (named >= 0) consumedIndex.add(`image-${named}`);
+      images.push({ path: value.path, name: value.path.split(/[\\/]/).pop() ?? value.path, image: true, preview: imagePreviewFromPath(value.path) });
+      continue;
+    }
+    // Persisted history stores images either as data-URL "image" items or as
+    // localImage items whose preview is hydrated afterwards; the upstream
+    // preamble supplies their original name and local path.
+    if (value.type === "image" && typeof value.url === "string" && value.url.startsWith("data:")) {
+      const named = preambleImages[imageIndex];
+      if (named) consumedIndex.add(`image-${imageIndex}`);
+      imageIndex += 1;
+      images.push({ path: named?.path ?? value.url, name: named?.name ?? "图片", image: true, preview: value.url });
+      continue;
+    }
+    if (value.type === "mention" && typeof value.path === "string") {
+      const key = normalizedPathKey(value.path);
+      const named = preambleFiles.findIndex((candidate, index) => !consumedIndex.has(`file-${index}`) && normalizedPathKey(candidate.path) === key);
+      if (named >= 0) consumedIndex.add(`file-${named}`);
+      files.push({ path: value.path, name: typeof value.name === "string" ? value.name : value.path.split(/[\\/]/).pop() ?? value.path, image: false });
+    }
+  }
+  // Attachments that survive only inside the preamble or element text.
+  preambleFiles.forEach((file, index) => { if (!consumedIndex.has(`file-${index}`)) files.push(file); });
+  preambleImages.forEach((image, index) => { if (!consumedIndex.has(`image-${index}`)) images.push({ ...image, preview: imagePreviewFromPath(image.path) }); });
+  return { images, files, body: bodies.join("\n\n") };
+}
+
 function textFromThreadItem(item: Record<string, unknown>) {
   if (item.type === "userMessage") {
-    return splitUpstreamAttachments(userTextItems(item).join("")).body;
+    return userMessageParts(item).body;
   }
   if (item.type === "agentMessage") return typeof item.text === "string" ? item.text : "";
   return "";
@@ -301,42 +460,8 @@ function normalizedPathKey(path: string) {
 
 function imagesFromThreadItem(item: Record<string, unknown>): UserImage[] {
   if (item.type !== "userMessage" || !Array.isArray(item.content)) return [];
-  const { images: preambleImages, files: preambleFiles } = splitUpstreamAttachments(userTextItems(item).join(""));
-  const consumedImages = new Set<number>();
-  const consumedFiles = new Set<number>();
-  const entries: UserImage[] = [];
-  let imageIndex = 0;
-  for (const entry of item.content) {
-    if (!entry || typeof entry !== "object") continue;
-    const value = entry as Record<string, unknown>;
-    if (value.type === "localImage" && typeof value.path === "string") {
-      const key = normalizedPathKey(value.path);
-      const named = preambleImages.findIndex((candidate, index) => !consumedImages.has(index) && normalizedPathKey(candidate.path) === key);
-      if (named >= 0) consumedImages.add(named);
-      entries.push({ path: value.path, name: value.path.split(/[\\/]/).pop() ?? value.path, image: true, preview: imagePreviewFromPath(value.path) });
-      continue;
-    }
-    // Persisted history stores images either as data-URL "image" items or as
-    // localImage items whose preview is hydrated afterwards; the upstream
-    // preamble supplies their original name and local path.
-    if (value.type === "image" && typeof value.url === "string" && value.url.startsWith("data:")) {
-      const named = preambleImages[imageIndex];
-      if (named) consumedImages.add(imageIndex);
-      imageIndex += 1;
-      entries.push({ path: named?.path ?? value.url, name: named?.name ?? "图片", image: true, preview: value.url });
-      continue;
-    }
-    if (value.type === "mention" && typeof value.path === "string") {
-      const key = normalizedPathKey(value.path);
-      const named = preambleFiles.findIndex((candidate, index) => !consumedFiles.has(index) && normalizedPathKey(candidate.path) === key);
-      if (named >= 0) consumedFiles.add(named);
-      entries.push({ path: value.path, name: typeof value.name === "string" ? value.name : value.path.split(/[\\/]/).pop() ?? value.path, image: false });
-    }
-  }
-  // Attachments that survive only inside the preamble text.
-  preambleFiles.forEach((file, index) => { if (!consumedFiles.has(index)) entries.push(file); });
-  preambleImages.forEach((image, index) => { if (!consumedImages.has(index)) entries.push({ ...image, preview: imagePreviewFromPath(image.path) }); });
-  return entries;
+  const { images, files } = userMessageParts(item);
+  return [...images, ...files];
 }
 
 function imagePreviewFromPath(path: string) {
@@ -865,15 +990,9 @@ function App() {
   useEffect(() => {
     if (!window.desktop) return;
     return window.desktop.onApproval((request) => {
-      const params = request.params;
-      setPendingApproval({
-        approvalId: String(request.requestId),
-        command: typeof params.command === "string" ? params.command : "Codex 请求执行一项命令",
-        cwd: typeof params.cwd === "string" ? params.cwd : "当前项目目录",
-        reason: typeof params.reason === "string" ? params.reason : "Codex App Server 请求执行命令",
-        source: "app-server",
-        requestId: request.requestId
-      });
+      const approval = approvalFromServerRequest(request);
+      if (!approval) return;
+      setPendingApproval(approval);
       setTool("approval");
     });
   }, []);
@@ -1406,13 +1525,18 @@ function App() {
     }
   }
 
+  async function respondToApproval(approval: Approval, action: "accept" | "session" | "decline" | "cancel") {
+    if (approval.source !== "app-server" || approval.requestId === undefined || !approval.method) return;
+    await window.desktop.respondApproval(approval.requestId, approval.method, approvalPayload(approval, action));
+  }
+
   async function executeApproval() {
     if (!pendingApproval) return;
     try {
       if (pendingApproval.source === "app-server" && pendingApproval.requestId !== undefined) {
-        await window.desktop.respondApproval(pendingApproval.requestId, "accept");
+        await respondToApproval(pendingApproval, "accept");
         setPendingApproval(undefined);
-        setNotice("已允许 App Server 执行一次");
+        setNotice("已允许这次请求");
         return;
       }
       const result = await window.desktop.executeCommand(pendingApproval.approvalId);
@@ -1423,12 +1547,34 @@ function App() {
     }
   }
 
+  async function approveForSession() {
+    if (!pendingApproval) return;
+    try {
+      await respondToApproval(pendingApproval, "session");
+      setPendingApproval(undefined);
+      setNotice("已允许，本会话内同类请求不再询问");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
   async function rejectApproval() {
     if (!pendingApproval) return;
     try {
-      if (pendingApproval.source === "app-server" && pendingApproval.requestId !== undefined) await window.desktop.respondApproval(pendingApproval.requestId, "decline");
+      await respondToApproval(pendingApproval, "decline");
       setPendingApproval(undefined);
-      setNotice("已拒绝这次命令请求");
+      setNotice("已拒绝这次请求");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function cancelApproval() {
+    if (!pendingApproval) return;
+    try {
+      await respondToApproval(pendingApproval, "cancel");
+      setPendingApproval(undefined);
+      setNotice("已取消，本轮执行被中止");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     }
@@ -1722,7 +1868,24 @@ function App() {
               </div> : <div className="file-empty"><FolderOpen size={26} /><strong>打开文件</strong><p>从工作区目录树中选择文件</p><button type="button" className="secondary-button" onClick={() => void chooseProject()}>选择文件夹…</button></div>}
             </div> : <div className="inspector-content">
               <label className="field-label" htmlFor="command-input">待执行命令</label><input id="command-input" value={command} onChange={(event) => setCommand(event.target.value)} />
-              {pendingApproval ? <div className="approval-card"><div className="approval-warning">需要你的确认</div><code>{pendingApproval.command}</code><small>{pendingApproval.cwd}</small>{pendingApproval.reason && <p className="approval-reason">{pendingApproval.reason}</p>}<div className="approval-actions"><button className="secondary-button" onClick={() => void rejectApproval()}>拒绝</button><button className="primary-button" onClick={() => void executeApproval()}>允许一次</button></div></div> : <><p className="helper-text">命令只会在已选择的本机项目目录中运行。</p><button className="primary-button full-button" onClick={() => void requestApproval()}>请求执行</button></>}
+              {pendingApproval ? <div className="approval-card">
+                <div className="approval-warning">{approvalWarningForKind[pendingApproval.kind]}</div>
+                <code>{pendingApproval.command}</code>
+                {pendingApproval.detail && <p className="approval-reason">{pendingApproval.detail}</p>}
+                {pendingApproval.cwd && <small>{pendingApproval.cwd}</small>}
+                {pendingApproval.reason && <p className="approval-reason">{pendingApproval.reason}</p>}
+                <div className="approval-actions">
+                  {pendingApproval.kind === "userInput" || pendingApproval.kind === "elicitation"
+                    ? <button className="primary-button" onClick={() => void cancelApproval()}>取消</button>
+                    : <>
+                      <button className="secondary-button" onClick={() => void rejectApproval()}>拒绝</button>
+                      {(pendingApproval.kind === "command" || pendingApproval.kind === "fileChange") && <button className="secondary-button" onClick={() => void cancelApproval()}>取消</button>}
+                      {(pendingApproval.kind === "command" || pendingApproval.kind === "fileChange") && <button className="secondary-button" onClick={() => void approveForSession()}>本会话允许</button>}
+                      {pendingApproval.kind === "permissions" && <button className="secondary-button" onClick={() => void approveForSession()}>允许（本会话）</button>}
+                      <button className="primary-button" onClick={() => void executeApproval()}>{pendingApproval.kind === "command" ? "允许一次" : pendingApproval.kind === "permissions" ? "允许（本回合）" : "允许"}</button>
+                    </>}
+                </div>
+              </div> : <><p className="helper-text">命令只会在已选择的本机项目目录中运行。</p><button className="primary-button full-button" onClick={() => void requestApproval()}>请求执行</button></>}
             </div>}
           </aside>}
         </div>

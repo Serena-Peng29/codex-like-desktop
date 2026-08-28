@@ -51,7 +51,7 @@ declare global {
       requestCommand(command: string): Promise<{ approvalId: string; command: string; cwd: string; reason: string }>;
       executeCommand(approvalId: string): Promise<{ stdout: string; stderr: string; code: number }>;
       onApproval(listener: (request: { requestId: number | string; method: string; params: Record<string, unknown> }) => void): () => void;
-      respondApproval(requestId: number | string, decision: "accept" | "decline" | "cancel"): Promise<void>;
+      respondApproval(requestId: number | string, method: string, payload: Record<string, unknown>): Promise<void>;
       onMessageDelta(listener: (event: { threadId?: string; turnId?: string; itemId?: string; delta: string }) => void): () => void;
       onAppServerEvent(listener: (event: { method: string; params: Record<string, unknown> }) => void): () => void;
       onAppServerRequest(listener: (request: { requestId: number | string; method: string; params: Record<string, unknown> }) => void): () => void;
