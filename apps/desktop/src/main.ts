@@ -165,9 +165,10 @@ function loadClientState() {
 // "最近" must only hold sessions that truly belong to no project. Client state can
 // still carry stale null bindings (lost workspace, older builds), so re-bind a
 // thread from the cwd recorded by the app server whenever the binding is missing.
-// Skipped on purpose: explicitly detached threads, non-project sessions (their cwd
-// is the home directory marker), and sessions of removed projects — those stay in
-// "最近" as loose sessions instead of vanishing with the removed workspace.
+// A thread whose cwd is a removed project is bound to that path too: it hides with
+// the removed workspace instead of scattering into "最近", and returns when the
+// project is re-added. Skipped on purpose: explicitly detached threads and
+// non-project sessions (their cwd is the home directory marker).
 function healThreadProjectBindings(threads: ThreadSummary[]) {
   let changed = false;
   for (const thread of threads) {
@@ -176,7 +177,7 @@ function healThreadProjectBindings(threads: ThreadSummary[]) {
     if (known === undefined) continue; // threads the app never tracked follow the renderer's cwd fallback
     if (typeof known === "string" && known) continue;
     const cwd = typeof thread.cwd === "string" ? thread.cwd : "";
-    if (!cwd || cwd === noProjectCwd || removedProjects.has(cwd)) continue;
+    if (!cwd || cwd === noProjectCwd) continue;
     threadProjectPaths.set(thread.id, cwd);
     unassignedThreadIds.delete(thread.id);
     // Keep the composer context in sync when the healed thread is the open one,
@@ -477,12 +478,11 @@ app.whenReady().then(async () => {
     if (typeof path !== "string" || !path.trim()) throw new Error("invalid_project_path");
     // Only detach the project from the product's own metadata; nothing on disk
     // is touched, per the requirement that removing never deletes user files.
+    // Thread bindings are kept so the project's sessions hide with it instead of
+    // scattering into "最近", and come straight back when it is re-added.
     removedProjects.add(path);
     pinnedProjects.delete(path);
     projectMeta.delete(path);
-    for (const [threadId, binding] of [...threadProjectPaths]) {
-      if (binding === path) { threadProjectPaths.set(threadId, null); unassignedThreadIds.add(threadId); }
-    }
     if (projectPath === path) { projectPath = null; activeThreadId = null; }
     persistClientState();
     return undefined;

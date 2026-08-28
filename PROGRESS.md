@@ -90,6 +90,7 @@
 - 2026-08-28：新增本地文件输入展开器及 3 个回归用例；`npm run typecheck`、`npm test`（3 个测试文件、7 个用例）、`npm run startup-check`、`npm run protocol-schema-check`、`git diff --check` 均通过；无真实 sidecar 时 `npm run protocol-smoke` 按预期跳过。
 - 2026-08-28：修复侧栏“最近”混入项目会话的问题（`apps/desktop/src/main.ts`）：`thread/list` 后按上游 `cwd` 自愈丢失的线程-项目绑定（跳过已移除项目、home 目录标记和显式“不使用项目”线程，新增持久化 `detachedThreadIds`）；未选项目的会话以 `os.homedir()` 作为固定 `cwd` 记录（sandbox/审批行为不变）；`app:state` 先取 history 再组装快照保证同一响应内一致。用真实状态文件+会话文件模拟验证：原 9 条误入“最近”的会话中 2 条回归 `codex-like-desktop` 分组，其余 7 条属于已移除项目、按规则留在“最近”。`npm run typecheck`、`npm test`（3 个测试文件、7 个用例）、`npm run startup-check`、`npm run protocol-schema-check` 通过；Electron 交互复测待正常桌面环境（同目录并发运行会互相覆盖，未启动第二个实例）。
 - 2026-08-28：修复重新添加已移除项目无效的问题（`apps/desktop/src/main.ts`）：`removedProjects` 此前是永久黑名单，`project:choose`/`project:set` 选回同一目录时侧栏不显示分组且重启后被清空；现在添加/设置项目时会解除该路径的移除标记，其会话经绑定自愈自动回到项目分组。模拟验证：重新添加 `MeetingCopilot` 后其 2 条会话立即恢复，其余已移除项目会话仍留在“最近”。`npm run typecheck`、`npm test`（7 用例）、`npm run startup-check` 通过。
+- 2026-08-28：移除项目不再把会话散落到“最近”（`apps/desktop/src/main.ts`，行为变更覆盖上一条中“已移除项目会话留在最近”的规则）：删除 `project:remove` 的线程解绑循环，会话保持绑定并随项目一起从侧栏隐藏，重新添加时原样恢复；绑定自愈改为把 `cwd` 属于已移除项目的丢失绑定线程绑回该路径，历史散落的会话随之上收。真实数据模拟：自愈后“最近”为空；移除 `codex-like-desktop` 时其 12 条会话随项目隐藏、重新添加后 12 条全部恢复。`npm run typecheck`、`npm test`（7 用例）、`npm run startup-check` 通过。
 
 ## 未解决问题
 
