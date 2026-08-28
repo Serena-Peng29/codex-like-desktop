@@ -92,6 +92,7 @@
 - 2026-08-28：修复重新添加已移除项目无效的问题（`apps/desktop/src/main.ts`）：`removedProjects` 此前是永久黑名单，`project:choose`/`project:set` 选回同一目录时侧栏不显示分组且重启后被清空；现在添加/设置项目时会解除该路径的移除标记，其会话经绑定自愈自动回到项目分组。模拟验证：重新添加 `MeetingCopilot` 后其 2 条会话立即恢复，其余已移除项目会话仍留在“最近”。`npm run typecheck`、`npm test`（7 用例）、`npm run startup-check` 通过。
 - 2026-08-28：移除项目不再把会话散落到“最近”（`apps/desktop/src/main.ts`，行为变更覆盖上一条中“已移除项目会话留在最近”的规则）：删除 `project:remove` 的线程解绑循环，会话保持绑定并随项目一起从侧栏隐藏，重新添加时原样恢复；绑定自愈改为把 `cwd` 属于已移除项目的丢失绑定线程绑回该路径，历史散落的会话随之上收。真实数据模拟：自愈后“最近”为空；移除 `codex-like-desktop` 时其 12 条会话随项目隐藏、重新添加后 12 条全部恢复。`npm run typecheck`、`npm test`（7 用例）、`npm run startup-check` 通过。
 - 2026-08-28：请求报错只留在对话流（`apps/desktop/src/renderer/main.tsx`）：发送失败的报错此前同时写入 `composer-error` 挂在输入框上方且切换会话不清空，会跟着用户进入其他对话；现 `runChat` 失败只写入会话气泡（原有逻辑），不再调用 `setErrorMessage`，并在新建会话和恢复会话时清空输入框残留报错。`npm run typecheck` 通过。与并行任务共用 renderer 文件，本次提交经 hunk 级 `git apply --cached` 只包含本任务改动。
+- 2026-08-28：修复恢复历史会话时附件渲染错乱（`apps/desktop/src/renderer/main.tsx`）：上游持久化用户消息时把本地附件折叠为 `# Files mentioned by the user: … ## My request:` 前导文本、图片记录为携带 data URL 的 `image` 项，渲染层此前只识别 `localImage`/`mention` 项，导致前导文本按原文渲染、缩略图丢失。现解析该前导文本还原附件列表（按扩展名区分图片/文件）、从 `image` 项的 data URL 恢复缩略图并按序配对名称与路径、剥离 `<image>` 标记文本，正文只显示 `My request:` 之后的真实请求。用真实会话记录验证：单图+PDF、5 图、4 图等多条会话的附件与正文均正确还原；`\s*` 跨行误配标题行的问题已改用行内空白修复。`npm run typecheck` 通过。与并行任务共用 renderer 文件，经 hunk 级 `git apply --cached` 只提交本任务改动。
 
 ## 未解决问题
 

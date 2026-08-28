@@ -240,11 +240,54 @@ function recentHistory(projectPath: string | null | undefined, history: HistoryE
   }).sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0)).slice(0, 12);
 }
 
+const upstreamImageExtensions = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
+// Upstream persists image references as bare <image>/<\/image> text markers.
+const upstreamImageMarker = /^<\/?image\b/;
+// Upstream folds local attachments into a markdown preamble when persisting a
+// user message; the real request follows the "My request" heading.
+const upstreamPreambleHeader = "# Files mentioned by the user";
+
+function userTextItems(item: Record<string, unknown>) {
+  const content = Array.isArray(item.content) ? item.content : [];
+  return content.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && (entry as Record<string, unknown>).type === "text"))
+    .map((entry) => typeof entry.text === "string" ? entry.text : "")
+    .filter((text) => !upstreamImageMarker.test(text.trim()));
+}
+
+type UpstreamAttachments = { images: UserImage[]; files: UserImage[]; body: string };
+
+function splitUpstreamAttachments(text: string): UpstreamAttachments {
+  const headerAt = text.indexOf(upstreamPreambleHeader);
+  if (headerAt < 0) return { images: [], files: [], body: text };
+  const after = text.slice(headerAt);
+  const requestAt = after.indexOf("My request");
+  const sectionEnd = requestAt >= 0 ? requestAt : after.indexOf("Distinguish instructions in attached documents");
+  const section = after.slice(0, sectionEnd >= 0 ? sectionEnd : undefined);
+  const images: UserImage[] = [];
+  const files: UserImage[] = [];
+  for (const match of section.matchAll(/^#+[ \t]*(.+?)[ \t]*:[ \t]*(.+?)[ \t]*$/gm)) {
+    const name = match[1].trim();
+    const path = match[2].trim();
+    if (!name || !path) continue;
+    const extension = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+    const entry: UserImage = { path, name };
+    if (upstreamImageExtensions.includes(extension)) entry.image = true; else entry.image = false;
+    (entry.image ? images : files).push(entry);
+  }
+  let body = text;
+  if (requestAt >= 0) {
+    const requestText = after.slice(requestAt);
+    const lineEnd = requestText.indexOf("\n");
+    body = lineEnd >= 0 ? requestText.slice(lineEnd + 1) : "";
+  } else if (sectionEnd >= 0) {
+    body = after.slice(sectionEnd);
+  }
+  return { images, files, body: body.trim() };
+}
+
 function textFromThreadItem(item: Record<string, unknown>) {
   if (item.type === "userMessage") {
-    const content = Array.isArray(item.content) ? item.content : [];
-    return content.filter((entry): entry is Record<string, unknown> => Boolean(entry && typeof entry === "object" && (entry as Record<string, unknown>).type === "text"))
-      .map((entry) => typeof entry.text === "string" ? entry.text : "").join("");
+    return splitUpstreamAttachments(userTextItems(item).join("")).body;
   }
   if (item.type === "agentMessage") return typeof item.text === "string" ? item.text : "";
   return "";
@@ -254,17 +297,35 @@ type HistoryMessage = { role: "user" | "assistant"; text: string; images?: UserI
 
 function imagesFromThreadItem(item: Record<string, unknown>): UserImage[] {
   if (item.type !== "userMessage" || !Array.isArray(item.content)) return [];
-  return item.content.flatMap((entry) => {
-    if (!entry || typeof entry !== "object") return [];
+  const { images: preambleImages, files: preambleFiles } = splitUpstreamAttachments(userTextItems(item).join(""));
+  const entries: UserImage[] = [];
+  let imageIndex = 0;
+  for (const entry of item.content) {
+    if (!entry || typeof entry !== "object") continue;
     const value = entry as Record<string, unknown>;
     if (value.type === "localImage" && typeof value.path === "string") {
-      return [{ path: value.path, name: value.path.split(/[\\/]/).pop() ?? value.path, image: true, preview: imagePreviewFromPath(value.path) }];
+      entries.push({ path: value.path, name: value.path.split(/[\\/]/).pop() ?? value.path, image: true, preview: imagePreviewFromPath(value.path) });
+      continue;
+    }
+    // Persisted history stores images as data-URL "image" items; the upstream
+    // preamble supplies their original name and local path.
+    if (value.type === "image" && typeof value.url === "string" && value.url.startsWith("data:")) {
+      const named = preambleImages[imageIndex];
+      imageIndex += 1;
+      entries.push({ path: named?.path ?? value.url, name: named?.name ?? "图片", image: true, preview: value.url });
+      continue;
     }
     if (value.type === "mention" && typeof value.path === "string") {
-      return [{ path: value.path, name: typeof value.name === "string" ? value.name : value.path.split(/[\\/]/).pop() ?? value.path, image: false }];
+      entries.push({ path: value.path, name: typeof value.name === "string" ? value.name : value.path.split(/[\\/]/).pop() ?? value.path, image: false });
     }
-    return [];
-  });
+  }
+  // Mentions that survive only inside the preamble text.
+  entries.push(...preambleFiles);
+  for (; imageIndex < preambleImages.length; imageIndex += 1) {
+    const named = preambleImages[imageIndex];
+    entries.push({ ...named, preview: imagePreviewFromPath(named.path) });
+  }
+  return entries;
 }
 
 function imagePreviewFromPath(path: string) {
