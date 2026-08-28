@@ -458,10 +458,10 @@ function MarkdownText({ text }: { text: string }) {
   return <div className="markdown-text">{output}</div>;
 }
 
-function UserMessageContent({ message }: { message: ChatMessage }) {
+function UserMessageContent({ message, onPreview }: { message: ChatMessage; onPreview?: (src: string, name: string) => void }) {
   return <>
-    {message.images?.length ? <div className="user-images">{message.images.map((image) => image.preview ? <img key={image.path} src={image.preview} alt="已发送图片" /> : <div className="user-image-placeholder" key={image.path}><Paperclip size={18} /></div>)}</div> : null}
-    {message.files?.length ? <div className="user-files">{message.files.map((file) => <span className="user-file-chip" key={file.path} title={file.path}><FileText size={14} /><span>{file.name}</span></span>)}</div> : null}
+    {message.images?.length ? <div className="user-images">{message.images.map((image) => image.preview ? <button type="button" className="user-image" key={image.path} title="点击预览大图" onClick={() => onPreview?.(image.preview as string, image.name)}><img src={image.preview} alt="已发送图片" /></button> : <div className="user-image-placeholder" key={image.path}><Paperclip size={18} /></div>)}</div> : null}
+    {message.files?.length ? <div className="user-files">{message.files.map((file) => <span className="user-file-chip" key={file.path} title={file.path}><span>{file.name}</span></span>)}</div> : null}
     {message.content ? <MarkdownText text={message.content} /> : null}
   </>;
 }
@@ -717,6 +717,7 @@ function App() {
   const [pendingApproval, setPendingApproval] = useState<Approval>();
   const [notice, setNotice] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [previewImage, setPreviewImage] = useState<{ src: string; name: string } | null>(null);
   const [tool, setTool] = useState<Tool>(null);
   const [fileTree, setFileTree] = useState<Record<string, FileEntry[]>>({});
   const [expandedDirs, setExpandedDirs] = useState<string[]>([]);
@@ -1650,7 +1651,7 @@ function App() {
                     {recentPrompts.length ? recentPrompts.map((prompt) => <button className="recent-prompt" key={`recent-${prompt}`} onClick={() => setInput(prompt)}><span className="recent-icon">◷</span><span>{prompt}</span><span className="recent-arrow" aria-hidden="true">↗</span></button>) : <div className="recent-empty">发送过的提示会出现在这里</div>}
                   </div>
                 </div>}
-                {messages.map((message) => message.role === "user" ? <div className="message user-message" key={message.id}><div className="message-content"><UserMessageContent message={message} /></div></div> : <div className="message assistant-message" key={message.id}><div className="message-content"><div className="assistant-identity"><img src={brandFavicon} alt="" aria-hidden="true" /><span>Codex Harness</span></div><AssistantParts message={message} /><div className="message-footer">{message.streaming ? <span className="thinking-status"><span>思考中</span><span className="stream-caret" aria-hidden="true" /></span> : <><button type="button" className="message-copy" title="复制回复" aria-label="复制回复" onClick={() => void navigator.clipboard?.writeText(message.content)}><Copy size={18} /></button>{message.completedAt !== undefined && <time className="message-time" dateTime={new Date(message.completedAt).toISOString()}>{formatMessageTime(message.completedAt)}</time>}</>}</div></div></div>)}
+                {messages.map((message) => message.role === "user" ? <div className="message user-message" key={message.id}><div className="message-content"><UserMessageContent message={message} onPreview={(src, name) => setPreviewImage({ src, name })} /></div></div> : <div className="message assistant-message" key={message.id}><div className="message-content"><div className="assistant-identity"><img src={brandFavicon} alt="" aria-hidden="true" /><span>Codex Harness</span></div><AssistantParts message={message} /><div className="message-footer">{message.streaming ? <span className="thinking-status"><span>思考中</span><span className="stream-caret" aria-hidden="true" /></span> : <><button type="button" className="message-copy" title="复制回复" aria-label="复制回复" onClick={() => void navigator.clipboard?.writeText(message.content)}><Copy size={18} /></button>{message.completedAt !== undefined && <time className="message-time" dateTime={new Date(message.completedAt).toISOString()}>{formatMessageTime(message.completedAt)}</time>}</>}</div></div></div>)}
                 {(diff || pendingApproval) && <div className="activity-strip"><span>◈</span><span>{diff ? "有一项文件差异待确认" : "有一条命令等待审批"}</span><button onClick={() => setTool(diff ? "diff" : "approval")}>查看</button></div>}
               </div>
             </div>
@@ -1727,6 +1728,11 @@ function App() {
         </div>
       </section>
       </div>
+      {previewImage && <div className="image-lightbox" role="dialog" aria-modal="true" aria-label={`图片预览：${previewImage.name}`} onClick={() => setPreviewImage(null)} onKeyDown={(event) => { if (event.key === "Escape") setPreviewImage(null); }} tabIndex={-1} ref={(element) => element?.focus()}>
+        <img src={previewImage.src} alt={previewImage.name} />
+        <div className="image-lightbox-caption">{previewImage.name}</div>
+        <button type="button" className="image-lightbox-close" aria-label="关闭预览" title="关闭预览" onClick={() => setPreviewImage(null)}><X size={18} /></button>
+      </div>}
       {editProject && <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="编辑项目" onKeyDown={(event) => { if (event.key === "Escape") setEditProject(null); }}>
         <div className="edit-project">
           <div className="edit-project-header"><h2>编辑项目</h2><button className="icon-button" title="关闭" aria-label="关闭" onClick={() => setEditProject(null)}>×</button></div>
