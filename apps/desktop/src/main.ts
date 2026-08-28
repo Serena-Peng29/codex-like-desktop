@@ -3,6 +3,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { delimiter, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { expandLocalFileInputs, type TurnInput } from "./turn-input.js";
@@ -21,6 +22,7 @@ type ClientState = {
   projectPath?: string | null;
   activeThreadId?: string | null;
   unassignedThreadIds?: string[];
+  detachedThreadIds?: string[];
   threadProjectPaths?: Record<string, string | null>;
   threadDisplayNames?: Record<string, string>;
   pinnedThreadIds?: string[];
@@ -102,7 +104,13 @@ const zhCollator = new Intl.Collator(["zh", "en"], { sensitivity: "base", numeri
 const allowedCommands = new Set(["node", "npm", "pnpm", "git", "cargo", "python", "python3", "echo"]);
 let activeThreadId: string | null = null;
 const unassignedThreadIds = new Set<string>();
+// Threads the user explicitly moved out of every project ("不使用项目"). Healing
+// must never re-bind them from their recorded cwd, or the menu action would not stick.
+const detachedThreadIds = new Set<string>();
 const threadProjectPaths = new Map<string, string | null>();
+// Threads started without a workspace record the process home directory as their
+// cwd, so grouping can tell "non-project session" apart from "sidecar spawn dir".
+const noProjectCwd = homedir();
 const threadDisplayNames = new Map<string, string>();
 const pinnedThreadIds = new Set<string>();
 const projectMeta = new Map<string, ProjectMeta>();
@@ -117,6 +125,7 @@ function persistClientState() {
       projectPath,
       activeThreadId,
       unassignedThreadIds: [...unassignedThreadIds],
+      detachedThreadIds: [...detachedThreadIds],
       threadProjectPaths: Object.fromEntries(threadProjectPaths),
       threadDisplayNames: Object.fromEntries(threadDisplayNames),
       pinnedThreadIds: [...pinnedThreadIds],
@@ -132,6 +141,7 @@ function loadClientState() {
     if (value.projectPath && existsSync(value.projectPath)) projectPath = value.projectPath;
     activeThreadId = typeof value.activeThreadId === "string" ? value.activeThreadId : null;
     for (const threadId of value.unassignedThreadIds ?? []) if (typeof threadId === "string" && threadId) unassignedThreadIds.add(threadId);
+    for (const threadId of value.detachedThreadIds ?? []) if (typeof threadId === "string" && threadId) detachedThreadIds.add(threadId);
     for (const [threadId, path] of Object.entries(value.threadProjectPaths ?? {})) {
       if (threadId && (path === null || typeof path === "string")) threadProjectPaths.set(threadId, path);
     }
@@ -152,12 +162,39 @@ function loadClientState() {
   } catch { /* first launch or malformed state */ }
 }
 
+// "最近" must only hold sessions that truly belong to no project. Client state can
+// still carry stale null bindings (lost workspace, older builds), so re-bind a
+// thread from the cwd recorded by the app server whenever the binding is missing.
+// Skipped on purpose: explicitly detached threads, non-project sessions (their cwd
+// is the home directory marker), and sessions of removed projects — those stay in
+// "最近" as loose sessions instead of vanishing with the removed workspace.
+function healThreadProjectBindings(threads: ThreadSummary[]) {
+  let changed = false;
+  for (const thread of threads) {
+    if (detachedThreadIds.has(thread.id)) continue;
+    const known = threadProjectPaths.get(thread.id);
+    if (known === undefined) continue; // threads the app never tracked follow the renderer's cwd fallback
+    if (typeof known === "string" && known) continue;
+    const cwd = typeof thread.cwd === "string" ? thread.cwd : "";
+    if (!cwd || cwd === noProjectCwd || removedProjects.has(cwd)) continue;
+    threadProjectPaths.set(thread.id, cwd);
+    unassignedThreadIds.delete(thread.id);
+    // Keep the composer context in sync when the healed thread is the open one,
+    // otherwise it would sit in its workspace group while turns run projectless.
+    if (thread.id === activeThreadId && !projectPath) projectPath = cwd;
+    changed = true;
+  }
+  if (changed) persistClientState();
+}
+
 async function listConversationHistory(): Promise<ThreadSummary[]> {
   try {
     const result = await sidecar.request("thread/list", { limit: 50, sortKey: "updated_at", sortDirection: "desc", archived: false });
     const data = (result as { data?: unknown[] } | null)?.data;
     if (!Array.isArray(data)) return [];
-    return data.filter((item): item is ThreadSummary => Boolean(item && typeof item === "object" && typeof (item as ThreadSummary).id === "string"));
+    const threads = data.filter((item): item is ThreadSummary => Boolean(item && typeof item === "object" && typeof (item as ThreadSummary).id === "string"));
+    healThreadProjectBindings(threads);
+    return threads;
   } catch { return []; }
 }
 
@@ -210,7 +247,10 @@ function createWindow() {
 async function ensureActiveThread() {
   const cwd = projectPath ?? undefined;
   if (activeThreadId) return activeThreadId;
-  const result = await sidecar.request("thread/start", { ...(cwd ? { cwd, sandbox: "workspace-write" } : {}), approvalPolicy: "on-request", ephemeral: false });
+  // Non-project threads still get a deterministic cwd so the sidebar can tell
+  // them apart from threads that inherited the sidecar's spawn directory; the
+  // sandbox stays gated on the chosen project.
+  const result = await sidecar.request("thread/start", { cwd: cwd ?? noProjectCwd, ...(projectPath ? { sandbox: "workspace-write" } : {}), approvalPolicy: "on-request", ephemeral: false });
   const thread = (result as { thread?: { id?: string }; id?: string } | null) ?? {};
   activeThreadId = thread.thread?.id ?? thread.id ?? null;
   if (!activeThreadId) throw new Error("thread_start_missing_id");
@@ -300,7 +340,10 @@ app.whenReady().then(async () => {
   ipcMain.handle("window:minimize", () => BrowserWindow.getFocusedWindow()?.minimize());
   ipcMain.handle("window:toggle-maximize", () => { const target = BrowserWindow.getFocusedWindow(); if (!target) return false; if (target.isMaximized()) target.unmaximize(); else target.maximize(); return target.isMaximized(); });
   ipcMain.handle("window:close", () => BrowserWindow.getFocusedWindow()?.close());
-  ipcMain.handle("app:state", async () => ({ projectPath, activeThreadId, unassignedThreadIds: [...unassignedThreadIds], threadProjectPaths: Object.fromEntries(threadProjectPaths), threadDisplayNames: Object.fromEntries(threadDisplayNames), pinnedThreadIds: [...pinnedThreadIds], projectMeta: Object.fromEntries(projectMeta), pinnedProjects: [...pinnedProjects], removedProjects: [...removedProjects], history: await listConversationHistory(), sidecar: sidecar.status, gateway: gatewayUrl, gatewayMode: gatewayIsRemote ? "remote" : "local" }));
+  ipcMain.handle("app:state", async () => {
+    const history = await listConversationHistory();
+    return { projectPath, activeThreadId, unassignedThreadIds: [...unassignedThreadIds], threadProjectPaths: Object.fromEntries(threadProjectPaths), threadDisplayNames: Object.fromEntries(threadDisplayNames), pinnedThreadIds: [...pinnedThreadIds], projectMeta: Object.fromEntries(projectMeta), pinnedProjects: [...pinnedProjects], removedProjects: [...removedProjects], history, sidecar: sidecar.status, gateway: gatewayUrl, gatewayMode: gatewayIsRemote ? "remote" : "local" };
+  });
   ipcMain.handle("project:choose", async () => { const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] }); if (!result.canceled && result.filePaths[0]) { projectPath = result.filePaths[0]; activeThreadId = null; await sidecar.request("workspace/set", { path: projectPath }).catch(() => undefined); persistClientState(); } return projectPath; });
   ipcMain.handle("project:set", async (_event, path: string) => { if (typeof path !== "string" || !path.trim()) throw new Error("invalid_project_path"); projectPath = path; activeThreadId = null; await sidecar.request("workspace/set", { path: projectPath }).catch(() => undefined); persistClientState(); return projectPath; });
   ipcMain.handle("project:clear", () => { projectPath = null; activeThreadId = null; persistClientState(); return undefined; });
@@ -409,7 +452,7 @@ app.whenReady().then(async () => {
     if (typeof threadId !== "string" || !threadId) throw new Error("invalid_thread_id");
     if (path !== null && (typeof path !== "string" || !path.trim())) throw new Error("invalid_project_path");
     threadProjectPaths.set(threadId, path);
-    if (path) unassignedThreadIds.delete(threadId); else unassignedThreadIds.add(threadId);
+    if (path) { unassignedThreadIds.delete(threadId); detachedThreadIds.delete(threadId); } else { unassignedThreadIds.add(threadId); detachedThreadIds.add(threadId); }
     persistClientState();
     return undefined;
   });
