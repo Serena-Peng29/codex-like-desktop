@@ -368,6 +368,15 @@ app.whenReady().then(async () => {
     if (statSync(resolved).size > 512 * 1024) throw new Error("file_too_large");
     return { path: resolved, content: readFileSync(resolved, "utf8") };
   });
+  // Restored history bubbles reference images by local path; rebuild their data
+  // URL previews here because the sandboxed renderer cannot read files itself.
+  ipcMain.handle("image:preview", (_event, filePath: string) => {
+    if (typeof filePath !== "string" || !filePath.trim()) throw new Error("invalid_path");
+    const resolved = resolve(filePath);
+    if (!existsSync(resolved) || !statSync(resolved).isFile()) return null;
+    if (statSync(resolved).size > 10 * 1024 * 1024) return null;
+    return imagePreview(resolved) ?? null;
+  });
   ipcMain.handle("chat:history", () => listConversationHistory());
   ipcMain.handle("chat:load", async (_event, threadId: string, requestedProjectPath?: string | null) => {
     if (!threadId || typeof threadId !== "string") throw new Error("invalid_thread_id");

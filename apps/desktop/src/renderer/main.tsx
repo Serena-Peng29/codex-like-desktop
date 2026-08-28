@@ -295,36 +295,47 @@ function textFromThreadItem(item: Record<string, unknown>) {
 
 type HistoryMessage = { role: "user" | "assistant"; text: string; images?: UserImage[]; parts?: AssistantPart[] };
 
+function normalizedPathKey(path: string) {
+  return path.replace(/[\\/]+/g, "/").replace(/\/$/, "").toLowerCase();
+}
+
 function imagesFromThreadItem(item: Record<string, unknown>): UserImage[] {
   if (item.type !== "userMessage" || !Array.isArray(item.content)) return [];
   const { images: preambleImages, files: preambleFiles } = splitUpstreamAttachments(userTextItems(item).join(""));
+  const consumedImages = new Set<number>();
+  const consumedFiles = new Set<number>();
   const entries: UserImage[] = [];
   let imageIndex = 0;
   for (const entry of item.content) {
     if (!entry || typeof entry !== "object") continue;
     const value = entry as Record<string, unknown>;
     if (value.type === "localImage" && typeof value.path === "string") {
+      const key = normalizedPathKey(value.path);
+      const named = preambleImages.findIndex((candidate, index) => !consumedImages.has(index) && normalizedPathKey(candidate.path) === key);
+      if (named >= 0) consumedImages.add(named);
       entries.push({ path: value.path, name: value.path.split(/[\\/]/).pop() ?? value.path, image: true, preview: imagePreviewFromPath(value.path) });
       continue;
     }
-    // Persisted history stores images as data-URL "image" items; the upstream
+    // Persisted history stores images either as data-URL "image" items or as
+    // localImage items whose preview is hydrated afterwards; the upstream
     // preamble supplies their original name and local path.
     if (value.type === "image" && typeof value.url === "string" && value.url.startsWith("data:")) {
       const named = preambleImages[imageIndex];
+      if (named) consumedImages.add(imageIndex);
       imageIndex += 1;
       entries.push({ path: named?.path ?? value.url, name: named?.name ?? "图片", image: true, preview: value.url });
       continue;
     }
     if (value.type === "mention" && typeof value.path === "string") {
+      const key = normalizedPathKey(value.path);
+      const named = preambleFiles.findIndex((candidate, index) => !consumedFiles.has(index) && normalizedPathKey(candidate.path) === key);
+      if (named >= 0) consumedFiles.add(named);
       entries.push({ path: value.path, name: typeof value.name === "string" ? value.name : value.path.split(/[\\/]/).pop() ?? value.path, image: false });
     }
   }
-  // Mentions that survive only inside the preamble text.
-  entries.push(...preambleFiles);
-  for (; imageIndex < preambleImages.length; imageIndex += 1) {
-    const named = preambleImages[imageIndex];
-    entries.push({ ...named, preview: imagePreviewFromPath(named.path) });
-  }
+  // Attachments that survive only inside the preamble text.
+  preambleFiles.forEach((file, index) => { if (!consumedFiles.has(index)) entries.push(file); });
+  preambleImages.forEach((image, index) => { if (!consumedImages.has(index)) entries.push({ ...image, preview: imagePreviewFromPath(image.path) }); });
   return entries;
 }
 
@@ -837,7 +848,11 @@ function App() {
       if (!nextState.activeThreadId) return;
       try {
         const entries = latestThreadMessages(await window.desktop.loadThread(nextState.activeThreadId));
-        if (entries.length) setMessages(entriesToChatMessages(entries));
+        if (entries.length) {
+          const chat = entriesToChatMessages(entries);
+          setMessages(chat);
+          void hydrateImagePreviews(chat);
+        }
       } catch { /* a stale persisted thread should not prevent launch */ }
       try {
         const { goal } = await window.desktop.getGoal();
@@ -1007,10 +1022,29 @@ function App() {
     }
   }
 
+  // Restored history images reference local paths without a data URL; reload
+  // their previews from disk so the bubbles show thumbnails instead of chips.
+  async function hydrateImagePreviews(messages: ChatMessage[]) {
+    if (!window.desktop?.imagePreview) return;
+    const targets: Array<{ id: string; index: number; path: string }> = [];
+    for (const message of messages) (message.images ?? []).forEach((image, index) => { if (!image.preview) targets.push({ id: message.id, index, path: image.path }); });
+    if (!targets.length) return;
+    const loaded = await Promise.all(targets.map(async (target) => ({ ...target, preview: await window.desktop.imagePreview(target.path).catch(() => null) })));
+    setMessages((current) => current.map((message) => {
+      const hits = loaded.filter((hit) => hit.id === message.id && hit.preview);
+      if (!hits.length || !message.images?.length) return message;
+      const images = [...message.images];
+      for (const hit of hits) images[hit.index] = { ...images[hit.index], preview: hit.preview as string };
+      return { ...message, images };
+    }));
+  }
+
   async function loadHistory(threadId: string, projectPath?: string | null) {
     try {
       const entries = latestThreadMessages(await window.desktop.loadThread(threadId, projectPath));
-      setMessages(entriesToChatMessages(entries));
+      const chat = entriesToChatMessages(entries);
+      setMessages(chat);
+      void hydrateImagePreviews(chat);
       setErrorMessage("");
       setState(await window.desktop.state());
       const { goal } = await window.desktop.getGoal().catch(() => ({ goal: null }) as { goal?: { objective?: string } | null });

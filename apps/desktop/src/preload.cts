@@ -14,6 +14,7 @@ contextBridge.exposeInMainWorld("desktop", {
   revealProject: (path: string) => ipcRenderer.invoke("project:reveal", path),
   listDirectory: (path: string) => ipcRenderer.invoke("fs:list", path),
   readFile: (path: string) => ipcRenderer.invoke("fs:read", path),
+  imagePreview: (path: string) => ipcRenderer.invoke("image:preview", path),
   setProjectMeta: (path: string, meta: { name?: string; folders?: string[] }) => ipcRenderer.invoke("project:set-meta", path, meta),
   toggleProjectPin: (path: string) => ipcRenderer.invoke("project:toggle-pin", path),
   removeProject: (path: string) => ipcRenderer.invoke("project:remove", path),
