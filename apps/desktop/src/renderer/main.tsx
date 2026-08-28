@@ -1320,7 +1320,7 @@ function App() {
 
       <section className="workspace">
         <header className="topbar">
-          <div className="topbar-title"><span className="title-folder" aria-hidden="true"><FolderOpen size={15} /></span><span className="topbar-project">{conversationTitle}</span><button className="title-menu" title="会话选项" aria-label="会话选项">•••</button></div>
+          <div className="topbar-title"><span className="title-folder" aria-hidden="true"><FolderOpen size={15} /></span><span className="topbar-project">{conversationTitle}</span></div>
           <div className="topbar-actions">
             <button className={`icon-button ${tool === "files" ? "is-active" : ""}`} title="打开文件" aria-label="打开文件" aria-expanded={tool === "files"} onClick={() => setTool(tool === "files" ? null : "files")}><PanelRight size={17} /></button>
           </div>

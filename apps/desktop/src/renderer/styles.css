@@ -77,8 +77,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .topbar-title { display: flex; align-items: center; min-width: 0; max-width: 27rem; gap: .55rem; overflow: hidden; color: #e6e4df; font-size: .88rem; white-space: nowrap; }
 .title-folder { color: #aaa8a2; font-size: 1.05rem; }
 .topbar-project { overflow: hidden; font-weight: 600; text-overflow: ellipsis; }
-.title-menu { padding: .2rem .35rem; color: #8b8983; background: transparent; letter-spacing: .12em; }
-.title-menu:hover { color: #eee; }
 .workspace-tabs { display: flex; align-self: stretch; margin-left: 1.1rem; }
 .tab { display: flex; align-items: center; gap: .45rem; padding: 0 1rem; color: #83817b; background: transparent; border-bottom: .15rem solid transparent; }
 .tab:hover { color: #dcdad5; background: #181816; }
@@ -772,7 +770,6 @@ body, .app-window, .app-shell, .workspace, .workspace-body, .conversation-pane {
 .title-folder { color: var(--muted); font-size: .9rem; }
 .title-folder { display: inline-flex; align-items: center; }
 .topbar-project { font-weight: 600; }
-.title-menu { padding: .15rem .35rem; color: var(--quiet); font-size: .85rem; letter-spacing: .18em; }
 .topbar-actions { gap: .1rem; }
 .location-button { min-height: 1.9rem; padding: .25rem .45rem; border-color: transparent; border-radius: .4rem; color: var(--muted); background: transparent; font-size: .7rem; }
 .location-button:hover, .topbar-actions .icon-button:hover { background: var(--badge); }
