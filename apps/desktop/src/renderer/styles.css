@@ -497,8 +497,6 @@ body { background: var(--app-bg); }
 /* Fixed three-region shell: titlebar, sidebar, and conversation surface. */
 .app-window { overflow: hidden; }
 .global-menubar { position: relative; inset: auto; width: 100%; height: 2.75rem; min-height: 2.75rem; flex: 0 0 2.75rem; padding: 0 .45rem .0 .7rem; border-bottom: 1px solid #d9d5cd; background: #f3f0e8; color: #292929; pointer-events: auto; }
-.window-title { display: flex; align-items: center; gap: .45rem; height: 100%; color: #222; font-size: .82rem; font-weight: 500; }
-.window-title img { width: 1.45rem; height: 1.45rem; border-radius: .3rem; object-fit: cover; }
 .global-menubar .window-actions { display: flex; align-items: center; height: 100%; margin-left: auto; pointer-events: auto; }
 .global-menubar .menu-icon { width: 2.7rem; height: 2.25rem; border-radius: .2rem; color: #292929; }
 .global-menubar .menu-icon:hover { background: #e2ded5; color: #111; }
@@ -541,7 +539,6 @@ body { background: var(--app-bg); }
 
 /* Use the dark product theme for the independent native-like titlebar. */
 .global-menubar { background: var(--sidebar-bg); border-bottom-color: var(--hairline); color: var(--text); }
-.window-title { color: #ececef; }
 .global-menubar .menu-icon { color: #c9c9ce; }
 .global-menubar .menu-icon:hover { background: var(--badge); color: var(--text); }
 .global-menubar .close-icon:hover { background: var(--danger); color: var(--app-bg); }
@@ -715,8 +712,6 @@ body { background: var(--app-bg); }
 
 body, .app-window, .app-shell, .workspace, .workspace-body, .conversation-pane { background: var(--app-bg); }
 .global-menubar { height: 2.35rem; min-height: 2.35rem; flex-basis: 2.35rem; padding-inline: .7rem; background: var(--sidebar-bg); border-bottom: 1px solid var(--hairline); }
-.window-title { font-size: .74rem; color: var(--text-secondary); }
-.window-title img { width: 1.25rem; height: 1.25rem; }
 .global-menubar .menu-icon { width: 2.25rem; height: 2rem; }
 
 .sidebar:not(.is-collapsed) { width: 21.5rem; flex-basis: 21.5rem; background: var(--sidebar-bg); border-right: 1px solid var(--hairline); }
@@ -888,12 +883,6 @@ body, .app-window, .app-shell, .workspace, .workspace-body, .conversation-pane {
 .pinned-section { margin-bottom: .4rem; padding-bottom: .45rem; border-bottom: 1px solid var(--hairline); }
 .pinned-group-name { display: flex; align-items: center; gap: .4rem; min-width: 0; padding: .3rem .5rem .2rem 1.05rem; color: var(--muted); font-size: .66rem; }
 .pinned-group-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.quick-panel { position: absolute; top: calc(100% + .3rem); right: .45rem; z-index: 45; display: grid; min-width: 13rem; padding: .3rem; border: 1px solid var(--hairline); border-radius: .55rem; background: var(--surface-card); box-shadow: 0 .8rem 2rem rgb(0 0 0 / 42%); animation: menu-in 160ms ease-out; }
-.quick-panel button { display: grid; grid-template-columns: 1.15rem 1fr auto; align-items: center; gap: .55rem; width: 100%; min-height: 2.2rem; padding: .35rem .55rem; border: 0; border-radius: .4rem; color: var(--text-secondary); background: transparent; text-align: left; font-size: .76rem; }
-.quick-panel button:hover { color: var(--text); background: var(--badge); }
-.quick-panel button span { display: inline-flex; align-items: center; }
-.quick-panel button small { color: var(--quiet); font-size: .62rem; }
 
 /* User attachments that are documents rather than images. */
 .attachment-chip.is-file { width: auto; min-width: 4.5rem; max-width: 12rem; gap: .4rem; padding-inline: .5rem; }

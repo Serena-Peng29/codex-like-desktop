@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, FilePenLine, FileText, FolderOpen, FolderPlus, Lightbulb, List, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, Paperclip, Pencil, Pin, PinOff, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, FilePenLine, FileText, FolderOpen, FolderPlus, Lightbulb, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, Paperclip, Pencil, Pin, PinOff, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
 import "./styles.css";
 
 const brandFavicon = new URL("./brand-favicon.png", import.meta.url).href;
@@ -491,7 +491,6 @@ function App() {
   const [renamingThread, setRenamingThread] = useState<{ threadId: string; value: string } | null>(null);
   const [projectMenu, setProjectMenu] = useState<{ path: string | null } | null>(null);
   const [editProject, setEditProject] = useState<{ path: string; name: string; folders: string[] } | null>(null);
-  const [quickPanelOpen, setQuickPanelOpen] = useState(false);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<UserImage[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -546,8 +545,6 @@ function App() {
       setMoveMenuOpen(false);
       if (target instanceof Element && target.closest(".project-menu, .project-more")) return;
       setProjectMenu(null);
-      if (target instanceof Element && target.closest(".quick-panel, .quick-panel-trigger")) return;
-      setQuickPanelOpen(false);
     };
     document.addEventListener("pointerdown", closeMenusOnOutsidePointer);
     return () => document.removeEventListener("pointerdown", closeMenusOnOutsidePointer);
@@ -1180,22 +1177,13 @@ function App() {
   return (
     <div className="app-window">
       <div className="global-menubar">
-        <div className="window-title"><img src={brandFavicon} alt="" aria-hidden="true" /><span>Codex Harness</span></div>
         <div className="window-controls"><button className="menu-icon" title="切换侧栏" aria-label="切换侧栏">◧</button><button className="menu-icon" title="后退" aria-label="后退">←</button><button className="menu-icon muted-icon" title="前进" aria-label="前进">→</button></div>
         <nav className="app-menus" aria-label="应用菜单"><button>文件</button><button>编辑</button><button>视图</button><button>帮助</button></nav>
         <div className="window-actions">
-          <button className="menu-icon quick-panel-trigger" title="快捷面板" aria-label="快捷面板" aria-expanded={quickPanelOpen} onClick={() => setQuickPanelOpen((open) => !open)}><List size={17} /></button>
           <button className="menu-icon" title="最小化" aria-label="最小化" onClick={() => void window.desktop?.window.minimize()}><Minus size={16} /></button>
           <button className="menu-icon" title="最大化" aria-label="最大化" onClick={() => void window.desktop?.window.toggleMaximize()}><Square size={15} /></button>
           <button className="menu-icon close-icon" title="关闭" aria-label="关闭" onClick={() => void window.desktop?.window.close()}><X size={17} /></button>
         </div>
-        {quickPanelOpen && <div className="quick-panel" role="menu" aria-label="快捷面板">
-          <button role="menuitem" onClick={() => { setQuickPanelOpen(false); setTool("diff"); }}>
-            <span aria-hidden="true"><FileText size={16} /></span>
-            <span className="quick-panel-label">文件</span>
-            <small>Ctrl+P</small>
-          </button>
-        </div>}
       </div>
       <div className="app-shell">
       <aside className={`sidebar ${sidebarCollapsed ? "is-collapsed" : ""}`} style={sidebarCollapsed ? { width: 64, flexBasis: 64 } : sidebarWidth === null ? undefined : { width: sidebarWidth, flexBasis: sidebarWidth }}>
