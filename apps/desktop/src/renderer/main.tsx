@@ -927,6 +927,7 @@ function App() {
       const binding = projectPath === undefined ? (state?.projectPath ?? null) : projectPath;
       await window.desktop.newThread(binding);
       setMessages([]);
+      setErrorMessage("");
       setInput("");
       setGoalText(null);
       setGoalInputMode(false);
@@ -948,6 +949,7 @@ function App() {
     try {
       const entries = latestThreadMessages(await window.desktop.loadThread(threadId, projectPath));
       setMessages(entriesToChatMessages(entries));
+      setErrorMessage("");
       setState(await window.desktop.state());
       const { goal } = await window.desktop.getGoal().catch(() => ({ goal: null }) as { goal?: { objective?: string } | null });
       setGoalText(goal?.objective?.trim() || null);
@@ -1011,9 +1013,10 @@ function App() {
       setNotice("请求完成，账本已完成本次扣费");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      // The failure lives in the conversation bubble so it stays scoped to this
+      // thread; keep it off the composer or it would follow the user elsewhere.
       setMessages((current) => current.map((item) => item.id === assistantId ? { ...item, content: `请求失败：${message}`, parts: [{ id: `error-${assistantId}`, kind: "text", text: `请求失败：${message}`, streaming: false }], completedAt: Date.now(), streaming: false } : item));
       setNotice(message);
-      setErrorMessage(message);
     } finally {
       activeAssistantId.current = null;
       setSending(false);
