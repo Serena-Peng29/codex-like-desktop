@@ -46,13 +46,13 @@
 
 - 图片消息缩略图预览且不显示文件名；纯图片请求可直接发送；主进程为文件选择生成预览 data URL 并保留在用户消息中。
 - 执行中发送按钮切换为停止，调用上游 `turn/interrupt`（带 `threadId` 与已建立的 `turnId`）。
-- Composer 添加菜单“文件/目标/计划模式”：文件支持任意本地文件（上游 `UserInput::Mention` 通道）与图片（`localImage`）；目标取当前输入框文字调用 `thread/goal/set` 并在输入框显示可清除徽标；计划模式对下一次提问生效，发送 `turn/start.collaborationMode: plan` 后自动退出并显示徽标。
-- 窗口右上角快捷面板入口，仅显示当前可用项（本期为“文件”）。
+- Composer 添加菜单“文件/目标/计划模式”：文件支持多选、图片 `localImage`，非图片保留附件 mention 并由主进程展开为受限大小的本地文件文本后随请求发送；目标取当前输入框文字调用 `thread/goal/set` 并在输入框显示可清除徽标；计划模式对下一次提问生效，发送 `turn/start.collaborationMode: plan` 后自动退出并显示徽标。
+- 窗口右上角“打开文件”入口显示工作区目录树和受限文本预览。
 
 ### 主进程持久化与 IPC
 
 - 持久化字段：threadDisplayNames、pinnedThreadIds、projectMeta、pinnedProjects、removedProjects。
-- IPC：thread:set-name / toggle-pin / set-project、project:set-meta / toggle-pin / remove / choose-folders / reveal、thread:goal-get / goal-clear、chat:choose-files（按 image/file 模式）。
+- IPC：thread:set-name / toggle-pin / set-project、project:set-meta / toggle-pin / remove / choose-folders / reveal、thread:goal-get / goal-clear、chat:choose-files（按 image/file 模式）、fs:list / fs:read。
 
 ### 测试网关与账本
 
@@ -62,7 +62,7 @@
 
 - 用 Rust/cargo 构建固定 commit 的 Windows/macOS App Server sidecar，并完成 `electron-builder` 资源打包、安装包和签名。
 - 对真实 sidecar 回归 initialize/initialized、流式事件、文件修改、命令审批、取消、线程恢复和版本兼容性；goal/plan 与 mention 读取行为待真实 sidecar 验证。
-- 修正并验证桥接报文符合上游 JSONL 协议：不发送 `jsonrpc: "2.0"`，无参数请求显式发送 `params: {}`。
+- 对真实 sidecar 回归 goal/plan、文件文本展开和跨平台路径行为仍待具备 Rust 工具链的环境完成。
 - 将测试网关和内存账本替换为服务端持久化 API，补齐 GPT 供应商转发、用量采集、认证、套餐、超额计费、微信/支付宝回调和管理后台。
 - 完成 Windows/macOS 自动更新、回滚、上游同步 CI 和跨平台发布验收。
 - button_function.md 的“手动排序”仅提供选项与持久化，拖拽排序另立任务。
@@ -70,7 +70,7 @@
 ## 下一步
 
 1. 在具备 Rust 工具链的构建机运行 `npm run build:sidecar`，将真实二进制放入桌面端资源目录。
-2. 移除桥接请求中的 `jsonrpc` 字段，运行 `npm run protocol-schema-check`、`npm run protocol-smoke` 和真实 App Server 回归。
+2. 在真实 sidecar 环境运行 `npm run protocol-schema-check`、`npm run protocol-smoke`，并回归 goal/plan、文件文本展开和线程恢复。
 3. 按服务端账本优先的规则设计持久化模型网关、认证和订单回调，再替换当前测试实现。
 
 ## 当前阻塞或待确认
@@ -87,11 +87,11 @@
 - 本机启动冒烟：清空 `ELECTRON_RUN_AS_NODE` 后 Electron 主进程与 renderer 正常拉起；当前 shell 沙箱导致 sidecar 子进程 `spawn UNKNOWN`（spawn 逻辑未变动，与改动无关），窗口内交互验证待正常桌面环境复测。
 - Playwright：本机 Chromium 缺少 bundled executable，改用本机 Chrome 完成 1440x900 与 390x844 截图核对，侧栏、轻量 Header、欢迎区和 Composer 无溢出；侧栏交互（项目展开/折叠、项目线程分组、“最近”筛选、窄屏无重叠）已验证。
 - `git diff --check`：通过（文件行数统计改动时验证）。
+- 2026-08-28：新增本地文件输入展开器及 3 个回归用例；`npm run typecheck`、`npm test`（3 个测试文件、7 个用例）、`npm run startup-check`、`npm run protocol-schema-check`、`git diff --check` 均通过；无真实 sidecar 时 `npm run protocol-smoke` 按预期跳过。
 
 ## 未解决问题
 
-- Figma 稿中未出现的交互态（hover、focus、disabled）按调色板就近派生灰阶；已隐藏的旧欢迎区 chips/recent-prompts 残留少量旧蓝色字面量，因当前不渲染未清理。
-- 非图片文件走上游 Mention 引用通道（协议无通用附件类型），真实 sidecar 对 mention 的读取行为待回归；快捷面板后续随新能力逐项补入。
+- 真实 sidecar 对 goal/plan、文件文本展开和跨平台路径行为待回归。
 
 ## 并发更新规则
 

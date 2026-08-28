@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { delimiter, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { expandLocalFileInputs, type TurnInput } from "./turn-input.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -78,13 +79,13 @@ class SidecarManager {
   request(method: string, params: Record<string, unknown> = {}) {
     if (!this.child?.stdin.writable) return Promise.reject(new Error("sidecar_not_running"));
     const id = this.nextId++;
-    this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    this.child.stdin.write(`${JSON.stringify({ id, method, params })}\n`);
     return new Promise<unknown>((resolvePromise, reject) => { const timer = setTimeout(() => { this.pending.delete(id); reject(new Error("sidecar_timeout")); }, 5000); this.pending.set(id, { resolve: (value) => { clearTimeout(timer); resolvePromise(value); }, reject: (error) => { clearTimeout(timer); reject(error); } }); });
   }
 
-  notify(method: string, params: Record<string, unknown> = {}) { if (this.child?.stdin.writable) this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`); }
+  notify(method: string, params: Record<string, unknown> = {}) { if (this.child?.stdin.writable) this.child.stdin.write(`${JSON.stringify({ method, params })}\n`); }
 
-  respond(id: number | string, result: Record<string, unknown>) { if (this.child?.stdin.writable) this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, result })}\n`); }
+  respond(id: number | string, result: Record<string, unknown>) { if (this.child?.stdin.writable) this.child.stdin.write(`${JSON.stringify({ id, result })}\n`); }
 
   async stop() { if (!this.child) return; this.child.kill(); this.child = null; this.status = "stopped"; }
 }
@@ -206,11 +207,6 @@ function createWindow() {
   window.loadFile(renderer);
 }
 
-// Wire shapes mirror upstream `UserInput` (fixed commit 25a6e31): text items,
-// `localImage` for images read from disk, and `mention` as the upstream-blessed
-// way to reference arbitrary local files (there is no generic attachment item).
-type TurnInput = { type: "text"; text: string } | { type: "localImage"; path: string } | { type: "mention"; name: string; path: string };
-
 async function ensureActiveThread() {
   const cwd = projectPath ?? undefined;
   if (activeThreadId) return activeThreadId;
@@ -232,7 +228,7 @@ async function runAppServerTurn(input: TurnInput[], options?: { effort?: string;
     try {
       return await new Promise<{ output: string; usage: Record<string, number> }>((resolvePromise, reject) => {
         activeTurn = { threadId: activeThreadId!, output: "", usage: {}, resolve: resolvePromise, reject };
-        void sidecar.request("turn/start", { threadId: activeThreadId, ...(cwd ? { cwd, sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd] } } : {}), approvalPolicy: "on-request", effort: options?.effort ?? "medium", ...(options?.planMode ? { collaborationMode: { mode: "plan", settings: { model: gatewayModel, reasoning_effort: "medium", developer_instructions: null } } } : {}), input }).then((result) => {
+        void sidecar.request("turn/start", { threadId: activeThreadId, ...(cwd ? { cwd, sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd] } } : {}), approvalPolicy: "on-request", effort: options?.effort ?? "medium", ...(options?.planMode ? { collaborationMode: { mode: "plan", settings: { model: gatewayModel, reasoning_effort: "medium", developer_instructions: null } } } : {}), input: expandLocalFileInputs(input) }).then((result) => {
           const turn = (result as { turn?: { id?: string } } | null)?.turn;
           if (activeTurn && turn?.id) {
             activeTurn.turnId = turn.id;

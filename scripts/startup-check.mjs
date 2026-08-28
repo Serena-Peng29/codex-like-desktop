@@ -16,7 +16,7 @@ const rendererHtml = readFileSync("apps/desktop/dist/renderer/index.html", "utf8
 if (rendererHtml.includes('src="/assets/') || rendererHtml.includes('href="/assets/')) throw new Error("renderer assets must use relative paths for Electron file:// loading");
 
 const child = spawn(process.execPath, ["scripts/mock-app-server.js"], { stdio: ["pipe", "pipe", "pipe"] });
-child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { clientInfo: { name: "Way2AGI Code", title: "Way2AGI Code", version: "0.1.0" }, capabilities: { experimentalApi: true } } }) + "\n");
+child.stdin.write(JSON.stringify({ id: 1, method: "initialize", params: { clientInfo: { name: "Way2AGI Code", title: "Way2AGI Code", version: "0.1.0" }, capabilities: { experimentalApi: true } } }) + "\n");
 let output = "";
 child.stdout.on("data", (chunk) => { output += chunk.toString(); });
 await new Promise((resolve, reject) => { const timer = setTimeout(() => reject(new Error("mock sidecar timeout")), 3000); child.stdout.once("data", () => { clearTimeout(timer); resolve(); }); });
