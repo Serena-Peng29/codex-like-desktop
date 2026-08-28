@@ -547,7 +547,7 @@ body { background: var(--app-bg); }
 .sidebar-scroll::-webkit-scrollbar, .conversation-scroll::-webkit-scrollbar { width: 0; height: 0; display: none; }
 
 /* Add-context menu follows the compact Harness command palette treatment. */
-.composer-tools-menu { width: min(24rem, 100%); margin-right: auto; padding: .25rem 0 .4rem; border: 1px solid var(--hairline); border-radius: .45rem; background: var(--surface-card); box-shadow: 0 .8rem 2rem rgb(0 0 0 / 38%); overflow: hidden; }
+.composer-tools-menu { width: min(24rem, 100%); margin-right: auto; padding: .25rem 0 .4rem; border: 1px solid var(--hairline); border-radius: .45rem; background: var(--surface-card); box-shadow: 0 .8rem 2rem rgb(0 0 0 / 38%); overflow: hidden; pointer-events: auto; }
 .composer-tools-title { padding: .2rem .6rem .35rem; color: var(--quiet); font-size: .78rem; }
 .composer-tools-menu button { display: grid; grid-template-columns: 1.2rem auto 1fr; align-items: center; gap: .65rem; width: 100%; min-height: 2.45rem; padding: .35rem .65rem; color: var(--text); background: transparent; text-align: left; }
 .composer-tools-menu button:hover, .composer-tools-menu .tool-selected { background: var(--badge); }

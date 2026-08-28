@@ -502,6 +502,7 @@ function App() {
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const [composerToolsOpen, setComposerToolsOpen] = useState(false);
   const [planMode, setPlanMode] = useState(false);
+  const [goalInputMode, setGoalInputMode] = useState(false);
   const [goalText, setGoalText] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -621,6 +622,10 @@ function App() {
   }, [messages]);
 
   useEffect(() => {
+    if (goalInputMode) composerInputRef.current?.focus();
+  }, [goalInputMode]);
+
+  useEffect(() => {
     if (!window.desktop) return;
     void window.desktop.state().then(async (nextState) => {
       setState(nextState);
@@ -677,9 +682,15 @@ function App() {
       if (event.method === "thread/goal/updated") {
         const goal = params.goal as { objective?: unknown } | undefined;
         setGoalText(typeof goal?.objective === "string" && goal.objective.trim() ? goal.objective : null);
+        setGoalInputMode(false);
+        setPlanMode(false);
         return;
       }
-      if (event.method === "thread/goal/cleared") { setGoalText(null); return; }
+      if (event.method === "thread/goal/cleared") {
+        setGoalText(null);
+        setGoalInputMode(false);
+        return;
+      }
       const id = activeAssistantId.current;
       if (!id) return;
       if (event.method === "item/reasoning/summaryTextDelta" || event.method === "item/reasoning/textDelta") {
@@ -774,6 +785,9 @@ function App() {
       await window.desktop.newThread(binding);
       setMessages([]);
       setInput("");
+      setGoalText(null);
+      setGoalInputMode(false);
+      setPlanMode(false);
       activeAssistantId.current = null;
       setDiff(undefined);
       setPendingApproval(undefined);
@@ -794,6 +808,8 @@ function App() {
       setState(await window.desktop.state());
       const { goal } = await window.desktop.getGoal().catch(() => ({ goal: null }) as { goal?: { objective?: string } | null });
       setGoalText(goal?.objective?.trim() || null);
+      setGoalInputMode(false);
+      setPlanMode(false);
       setSessionMenu(null);
       setMoveMenuOpen(false);
       setNotice("已恢复本地会话");
@@ -805,6 +821,10 @@ function App() {
   async function runChat() {
     const message = input.trim();
     const outgoingAttachments = attachments;
+    if (goalInputMode) {
+      await saveGoal(message);
+      return;
+    }
     if (!message && !outgoingAttachments.length) {
       setNotice("请输入任务内容或添加附件");
       setErrorMessage("请输入任务内容或添加附件");
@@ -889,17 +909,25 @@ function App() {
     setNotice("已粘贴图片");
   }
 
-  async function setGoal() {
-    const objective = input.trim();
+  function activateGoalInput() {
     setComposerToolsOpen(false);
+    setPlanMode(false);
+    setGoalInputMode(true);
+    setErrorMessage("");
+    setNotice("请输入目标内容，按 Enter 或发送后保存");
+  }
+
+  async function saveGoal(objective: string) {
     if (!objective) {
-      setNotice("请先在输入框输入目标内容，再点击“目标”");
-      setErrorMessage("请先在输入框输入目标内容，再点击“目标”");
+      setNotice("请输入目标内容");
+      setErrorMessage("请输入目标内容");
       return;
     }
     try {
       await window.desktop.setGoal(objective);
       setGoalText(objective);
+      setGoalInputMode(false);
+      setPlanMode(false);
       setInput("");
       setErrorMessage("");
       setNotice("目标已保存，将持续作用于当前会话");
@@ -911,12 +939,38 @@ function App() {
   }
 
   async function clearGoal() {
+    if (goalInputMode && goalText === null) {
+      setGoalInputMode(false);
+      setNotice("已取消设置目标");
+      return;
+    }
     try {
       await window.desktop.clearGoal();
       setGoalText(null);
+      setGoalInputMode(false);
       setNotice("已清除当前会话目标");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function togglePlanMode() {
+    setComposerToolsOpen(false);
+    if (planMode) {
+      setPlanMode(false);
+      setNotice("已关闭计划模式");
+      return;
+    }
+    try {
+      if (goalText !== null) await window.desktop.clearGoal();
+      setGoalText(null);
+      setGoalInputMode(false);
+      setPlanMode(true);
+      setNotice("已开启计划模式，仅下一次提问生效");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setNotice(`计划模式开启失败：${message}`);
+      setErrorMessage(`计划模式开启失败：${message}`);
     }
   }
 
@@ -1350,13 +1404,13 @@ function App() {
                 {errorMessage && <div className="composer-error" role="alert">{errorMessage}</div>}
                 {!hasConversation && <div className="launcher-context"><div className="workspace-picker-wrap"><button className="context-picker" onClick={() => setWorkspaceMenuOpen((open) => !open)} title="选择工作区" aria-haspopup="menu" aria-expanded={workspaceMenuOpen}><FolderOpen size={17} /><strong>{projectName(state?.projectPath)}</strong></button>{workspaceMenuOpen && <div className="workspace-menu" role="menu"><button role="menuitem" onClick={() => void chooseProject()}>选择文件夹…</button><button role="menuitem" onClick={() => void clearProject()}>不使用工作区</button></div>}</div></div>}
                 {attachments.length > 0 && <div className="composer-attachments" aria-label="已添加附件">{attachments.map((attachment, index) => <span className={`attachment-chip ${attachment.image === false ? "is-file" : ""}`} key={attachment.path} title={attachment.path}>{attachment.image === false ? <><span className="attachment-placeholder"><FileText size={16} /></span><span className="attachment-name">{attachment.name}</span></> : attachment.preview ? <img src={attachment.preview} alt="已添加图片" /> : <span className="attachment-placeholder"><Paperclip size={16} /></span>}<button type="button" aria-label="移除附件" onClick={() => setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index))}>×</button></span>)}</div>}
-                <textarea value={input} onChange={(event) => { setInput(event.target.value); setErrorMessage(""); }} onPaste={(event) => void handleComposerPaste(event)} onKeyDown={handleComposerKeyDown} placeholder={hasConversation ? "输入后续修改要求" : "描述你想要构建的内容"} aria-label="任务输入" />
+                <textarea ref={composerInputRef} value={input} onChange={(event) => { setInput(event.target.value); setErrorMessage(""); }} onPaste={(event) => void handleComposerPaste(event)} onKeyDown={handleComposerKeyDown} placeholder={goalInputMode ? "输入目标内容" : hasConversation ? "输入后续修改要求" : "描述你想要构建的内容"} aria-label={goalInputMode ? "目标输入" : "任务输入"} />
                 <div className="composer-menu-layer">
                   {composerToolsOpen && <div className="composer-tools-menu" role="menu" aria-label="添加工具">
                     <div className="composer-tools-title">添加</div>
                     <button role="menuitem" onClick={() => void addFiles("file")}><Paperclip size={18} /><strong>文件</strong><span>选择本地文件随消息发送</span></button>
-                    <button role="menuitem" onClick={() => void setGoal()}><Target size={18} /><strong>目标</strong><span>用输入框内容设置要持续追求的目标</span></button>
-                    <button role="menuitem" className={planMode ? "tool-selected" : ""} onClick={() => { setPlanMode((active) => !active); setComposerToolsOpen(false); setNotice(planMode ? "已关闭计划模式" : "已开启计划模式，仅下一次提问生效"); }}><Lightbulb size={18} /><strong>计划模式</strong><span>{planMode ? "已开启，仅下一次提问生效" : "开启计划模式"}</span></button>
+                    <button role="menuitem" className={goalInputMode || goalText !== null ? "tool-selected" : ""} onClick={activateGoalInput}><Target size={18} /><strong>目标</strong><span>{goalInputMode ? "输入内容后按 Enter 或发送" : "设置要持续追求的目标"}</span></button>
+                    <button role="menuitem" className={planMode ? "tool-selected" : ""} onClick={() => void togglePlanMode()}><Lightbulb size={18} /><strong>计划模式</strong><span>{planMode ? "已开启，仅下一次提问生效" : "开启计划模式"}</span></button>
                   </div>}
                   {openMenu === "permission" && <div className="composer-menu permission-menu" role="menu" aria-label="命令权限">
                     <div className="menu-title">应如何批准本地操作？</div>
@@ -1373,7 +1427,7 @@ function App() {
                 <div className="composer-footer">
                   <div className="composer-left">
                     <button className="composer-icon" title="添加上下文" aria-label="添加上下文" aria-expanded={composerToolsOpen} onClick={() => { setComposerToolsOpen((open) => !open); setOpenMenu(null); }}><Plus size={19} /></button>
-                    {goalText !== null && <button className="composer-pill" title={`${goalText}（点击清除目标）`} aria-label="清除当前会话目标" onClick={() => void clearGoal()}><Target size={13} /><span>{goalText}</span></button>}
+                    {(goalInputMode || goalText !== null) && <button className="composer-pill" title="点击取消或清除目标" aria-label={goalInputMode ? "取消设置目标" : "清除当前会话目标"} onClick={() => void clearGoal()}><Target size={13} /><span>目标</span></button>}
                     {planMode && <button className="composer-pill is-active" title="计划模式仅下一次提问生效（点击关闭）" aria-label="关闭计划模式" onClick={() => setPlanMode(false)}><Lightbulb size={13} /><span>计划模式</span></button>}
                     <button className={`menu-trigger permission-trigger ${permission !== "ask" ? "permission-selected" : ""}`} title="命令权限" aria-label="命令权限" aria-expanded={openMenu === "permission"} onClick={() => { setOpenMenu(openMenu === "permission" ? null : "permission"); setComposerToolsOpen(false); }}><span>{permissionOptions.find((option) => option.value === permission)?.label}</span></button>
                   </div>
