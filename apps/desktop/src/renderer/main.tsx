@@ -1,12 +1,141 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, FilePenLine, FileText, FolderOpen, FolderPlus, Lightbulb, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, PanelRight, Paperclip, Pencil, Pin, PinOff, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, FilePenLine, FileText, Folder, FolderOpen, FolderPlus, Lightbulb, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, PanelRight, Paperclip, Pencil, Pin, PinOff, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
 import "./styles.css";
 
 const brandFavicon = new URL("./brand-favicon.png", import.meta.url).href;
 
 type Tool = "diff" | "approval" | "files" | null;
 type FileEntry = { name: string; path: string; kind: "dir" | "file" };
+const fileGlyphs: Record<string, string> = { json: "{}", jsonc: "{}", lock: "{}", md: "MD", mdx: "MD", ts: "TS", tsx: "TS", js: "JS", jsx: "JS", mjs: "JS", cjs: "JS", py: "PY", rs: "RS", go: "GO", css: "CSS", scss: "CSS", html: "<>", htm: "<>", xml: "<>", svg: "<>", yml: "YML", yaml: "YML", toml: "TOML", sh: "SH", ps1: "PS", sql: "SQL", zip: "ZIP", gz: "ZIP" };
+function fileGlyph(name: string) {
+  if (!name.includes(".")) return "";
+  const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
+  return fileGlyphs[ext] ?? "";
+}
+type CodeToken = { text: string; cls: string };
+const tokenSpecs: Record<string, Array<[RegExp, string]>> = {
+  json: [
+    [/"(?:[^"\\\n]|\\.)*"(?=\s*:)/, "tok-key"],
+    [/"(?:[^"\\\n]|\\.)*"/, "tok-str"],
+    [/\b(?:true|false|null)\b/, "tok-bool"],
+    [/-?\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/, "tok-num"]
+  ],
+  js: [
+    [/\b(?:import|export|from|default|const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|class|extends|new|this|super|async|await|try|catch|finally|throw|typeof|instanceof|delete|void|in|of|yield|static|interface|type|enum|implements|public|private|protected|readonly|declare|as)\b/, "tok-kw"],
+    [/\b(?:null|undefined|true|false|NaN|Infinity)\b/, "tok-bool"],
+    [/\/\/[^\n]*|\/\*[\s\S]*?\*\//, "tok-com"],
+    [/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`/, "tok-str"],
+    [/\b0[xXbBoO][\da-fA-F]+\b|\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/, "tok-num"]
+  ],
+  css: [
+    [/\/\*[\s\S]*?\*\//, "tok-com"],
+    [/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/, "tok-str"],
+    [/#[\da-fA-F]{3,8}\b/, "tok-num"],
+    [/@[\w-]+/, "tok-kw"],
+    [/[.#][\w-]+|[\w-]+(?=\s*:)/, "tok-key"],
+    [/\b\d+(?:\.\d+)?(?:px|em|rem|%|vh|vw|vmin|vmax|s|ms|deg|fr|ch|pt)?\b/, "tok-num"]
+  ],
+  py: [
+    [/#[^\n]*/, "tok-com"],
+    [/"""[\s\S]*?"""|'''[\s\S]*?'''/, "tok-str"],
+    [/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/, "tok-str"],
+    [/@[\w.]+/, "tok-kw"],
+    [/\b(?:def|class|return|if|elif|else|for|while|break|continue|import|from|as|with|try|except|finally|raise|lambda|pass|global|nonlocal|assert|yield|del|and|or|not|in|is|async|await)\b/, "tok-kw"],
+    [/\b(?:True|False|None)\b/, "tok-bool"],
+    [/\b\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\b/, "tok-num"]
+  ],
+  markup: [
+    [/<!--[\s\S]*?-->/, "tok-com"],
+    [/<\/?[\w:-]+|\/?>/, "tok-kw"],
+    [/[\w-]+(?==)/, "tok-key"],
+    [/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/, "tok-str"]
+  ],
+  yaml: [
+    [/#[^\n]*/, "tok-com"],
+    [/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'/, "tok-str"],
+    [/[\w.-]+(?=\s*[:=])/, "tok-key"],
+    [/\b(?:true|false|null|yes|no|on|off)\b/, "tok-bool"],
+    [/\b\d+(?:\.\d+)?\b/, "tok-num"]
+  ],
+  md: [
+    [/^#{1,6}[^\n]*/, "tok-kw"],
+    [/```[\s\S]*?```|`[^`\n]+`/, "tok-str"],
+    [/\*\*[^*\n]+\*\*/, "tok-key"],
+    [/\[[^\]\n]*\]\([^)\n]*\)/, "tok-key"]
+  ],
+  shell: [
+    [/#[^\n]*/, "tok-com"],
+    [/"(?:[^"\\\n]|\\.)*"|'[^'\n]*'/, "tok-str"],
+    [/\b(?:if|then|else|elif|fi|for|while|do|done|case|esac|function|return|export|local|source|echo|cd|set)\b/, "tok-kw"],
+    [/\$\{?[\w@#?]+\}?/, "tok-num"],
+    [/\b\d+\b/, "tok-num"]
+  ]
+};
+function languageKey(name: string) {
+  const ext = name.includes(".") ? name.slice(name.lastIndexOf(".") + 1).toLowerCase() : "";
+  if (["json", "jsonc"].includes(ext)) return "json";
+  if (["js", "jsx", "mjs", "cjs", "ts", "tsx"].includes(ext)) return "js";
+  if (["css", "scss", "less"].includes(ext)) return "css";
+  if (ext === "py") return "py";
+  if (["html", "htm", "xml", "svg", "vue"].includes(ext)) return "markup";
+  if (["yml", "yaml", "toml", "ini", "cfg"].includes(ext)) return "yaml";
+  if (["md", "markdown", "mdx"].includes(ext)) return "md";
+  if (["sh", "bash", "zsh", "ps1", "bat"].includes(ext)) return "shell";
+  return "";
+}
+function tokenize(code: string, specs: Array<[RegExp, string]>): CodeToken[] {
+  const pattern = new RegExp(specs.map(([spec]) => `(${spec.source})`).join("|"), "gm");
+  const tokens: CodeToken[] = [];
+  let last = 0;
+  for (const match of code.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    if (start > last) tokens.push({ text: code.slice(last, start), cls: "" });
+    const specIndex = match.slice(1).findIndex((value) => value !== undefined);
+    tokens.push({ text: match[0], cls: specIndex >= 0 ? specs[specIndex][1] : "" });
+    last = start + match[0].length;
+  }
+  if (last < code.length) tokens.push({ text: code.slice(last), cls: "" });
+  return tokens;
+}
+function tokensToLines(tokens: CodeToken[]): CodeToken[][] {
+  const lines: CodeToken[][] = [[]];
+  for (const token of tokens) {
+    const parts = token.text.split("\n");
+    parts.forEach((part, index) => {
+      if (index > 0) lines.push([]);
+      if (part) lines[lines.length - 1].push({ text: part, cls: token.cls });
+    });
+  }
+  return lines;
+}
+const maxCodeLines = 8000;
+function FileCodeView({ name, content }: { name: string; content: string }) {
+  const rows = useMemo(() => {
+    const normalized = content.replace(/\r/g, "");
+    const all = normalized.replace(/\n$/, "").split("\n");
+    const shown = all.slice(0, maxCodeLines);
+    const specs = tokenSpecs[languageKey(name)] ?? [];
+    const tokens = specs.length && normalized.length <= 200_000 ? tokenize(normalized, specs) : null;
+    const perLine = tokens ? tokensToLines(tokens) : shown.map((line) => [line.length ? { text: line, cls: "" } : { text: " ", cls: "" }]);
+    return {
+      lines: shown.map((_, index) => perLine[index]?.length ? perLine[index] : [{ text: " ", cls: "" }]),
+      truncated: all.length > maxCodeLines,
+      omitted: Math.max(0, all.length - maxCodeLines)
+    };
+  }, [name, content]);
+  return (
+    <div className="file-editor-body">
+      {rows.lines.map((tokens, index) => (
+        <div className="code-line" key={index}>
+          <span className="code-ln" aria-hidden="true">{index + 1}</span>
+          <span className="code-text">{tokens.map((token, tokenIndex) => <span key={tokenIndex} className={token.cls || undefined}>{token.text}</span>)}</span>
+        </div>
+      ))}
+      {rows.truncated && <div className="code-line"><span className="code-ln" aria-hidden="true">…</span><span className="code-text code-truncated">已省略其余 {rows.omitted} 行</span></div>}
+    </div>
+  );
+}
 type Diff = { path: string; before: string; after: string; status: string };
 type Approval = { approvalId: string; command: string; cwd: string; reason: string; source?: "local" | "app-server"; requestId?: number | string };
 type Permission = "ask" | "auto" | "full";
@@ -521,18 +650,30 @@ function App() {
   const [expandedDirs, setExpandedDirs] = useState<string[]>([]);
   const [fileFilter, setFileFilter] = useState("");
   const [openedFile, setOpenedFile] = useState<{ path: string; content: string } | null>(null);
+  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
+  const [editorWidth, setEditorWidth] = useState<number | null>(null);
   const [fileNotice, setFileNotice] = useState("");
   const [sending, setSending] = useState(false);
   const activeAssistantId = useRef<string | null>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const conversationScrollRef = useRef<HTMLDivElement | null>(null);
   const resizingSidebarRef = useRef(false);
+  const resizingEditorRef = useRef(false);
 
   useEffect(() => {
     const onPointerMove = (event: PointerEvent) => {
-      if (!resizingSidebarRef.current) return;
-      setSidebarWidth(Math.max(240, Math.min(520, event.clientX)));
+      if (resizingSidebarRef.current) {
+        setSidebarWidth(Math.max(240, Math.min(520, event.clientX)));
+        return;
+      }
+      if (resizingEditorRef.current) {
+        const right = document.querySelector(".file-editor")?.getBoundingClientRect().right ?? window.innerWidth;
+        const body = document.querySelector(".workspace-body")?.getBoundingClientRect().width ?? window.innerWidth;
+        const inspector = document.querySelector(".inspector")?.getBoundingClientRect().width ?? 0;
+        setEditorWidth(Math.max(280, Math.min((body - inspector - 5) * 0.8, right - event.clientX)));
+      }
     };
-    const onPointerUp = () => { resizingSidebarRef.current = false; };
+    const onPointerUp = () => { resizingSidebarRef.current = false; resizingEditorRef.current = false; };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
     return () => { window.removeEventListener("pointermove", onPointerMove); window.removeEventListener("pointerup", onPointerUp); };
@@ -561,6 +702,7 @@ function App() {
     setFileTree({});
     setExpandedDirs([]);
     setOpenedFile(null);
+    setSelectedFilePath(null);
     setFileFilter("");
     setFileNotice("");
   }, [state?.projectPath]);
@@ -1096,7 +1238,6 @@ function App() {
 
   async function toggleDirectory(entry: FileEntry) {
     setFileNotice("");
-    setOpenedFile(null);
     if (expandedDirs.includes(entry.path)) {
       setExpandedDirs((dirs) => dirs.filter((dir) => dir !== entry.path));
       return;
@@ -1107,6 +1248,13 @@ function App() {
 
   async function openWorkspaceFile(entry: FileEntry) {
     setFileNotice("");
+    setSelectedFilePath(entry.path);
+    setEditorWidth((current) => {
+      if (current !== null) return current;
+      const body = document.querySelector(".workspace-body")?.getBoundingClientRect().width ?? window.innerWidth * 0.6;
+      const inspector = document.querySelector(".inspector")?.getBoundingClientRect().width ?? 0;
+      return Math.max(300, Math.round((body - inspector - 5) * 0.6));
+    });
     try {
       setOpenedFile(await window.desktop.readFile(entry.path));
     } catch (error) {
@@ -1115,16 +1263,23 @@ function App() {
     }
   }
 
+  function renderFileRow(entry: FileEntry, depth: number, expanded = false) {
+    const glyph = entry.kind === "file" ? fileGlyph(entry.name) : "";
+    return (
+      <button type="button" className={`file-row ${entry.kind === "dir" ? "is-dir" : ""} ${entry.path === selectedFilePath ? "is-selected" : ""}`} style={{ paddingLeft: `${0.4 + depth * 0.55}rem` }} title={entry.path} onClick={() => entry.kind === "dir" ? void toggleDirectory(entry) : void openWorkspaceFile(entry)}>
+        <span className="file-row-chevron" aria-hidden="true">{entry.kind === "dir" && <ChevronRight size={11} className={expanded ? "is-open" : ""} />}</span>
+        <span className="file-row-icon" aria-hidden="true">{entry.kind === "dir" ? expanded ? <FolderOpen size={13} /> : <Folder size={13} /> : glyph ? <span className="file-row-glyph">{glyph}</span> : <FileText size={13} />}</span>
+        <span className="file-row-name">{entry.name}</span>
+      </button>
+    );
+  }
+
   function renderFileTree(dirPath: string, depth: number): ReactNode {
     return (fileTree[dirPath] ?? []).map((entry) => {
       const expanded = expandedDirs.includes(entry.path);
       return (
         <div className="file-tree-branch" key={entry.path}>
-          <button type="button" className={`file-row ${entry.kind === "dir" ? "is-dir" : ""}`} style={{ paddingLeft: `${0.45 + depth * 0.85}rem` }} onClick={() => entry.kind === "dir" ? void toggleDirectory(entry) : void openWorkspaceFile(entry)}>
-            <span className="file-row-chevron" aria-hidden="true">{entry.kind === "dir" && <ChevronRight size={13} className={expanded ? "is-open" : ""} />}</span>
-            <span className="file-row-icon" aria-hidden="true">{entry.kind === "dir" ? <FolderOpen size={14} /> : <FileText size={14} />}</span>
-            <span className="file-row-name">{entry.name}</span>
-          </button>
+          {renderFileRow(entry, depth, expanded)}
           {entry.kind === "dir" && expanded && renderFileTree(entry.path, depth + 1)}
         </div>
       );
@@ -1437,26 +1592,31 @@ function App() {
             </div>
           </main>
 
-          {tool && <aside className="inspector">
-            <div className="inspector-header"><div><span className="section-label">{tool === "files" ? "工作区" : "工具面板"}</span><h2>{tool === "diff" ? "文件差异" : tool === "approval" ? "命令审批" : "打开文件"}</h2></div><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div>
+          {tool === "files" && openedFile && <div className="editor-divider" role="separator" aria-orientation="vertical" aria-label="调整文件区域宽度" onPointerDown={(event) => { event.preventDefault(); resizingEditorRef.current = true; }} onDoubleClick={() => setEditorWidth(null)} />}
+          {tool === "files" && openedFile && <aside className="file-editor" style={editorWidth === null ? undefined : { width: editorWidth, flex: "0 0 auto" }} aria-label="文件内容">
+            <div className="file-editor-header">
+              <div className="file-editor-crumb" title={openedFile.path}>
+                {openedFile.path.split(/[\\/]/).filter(Boolean).map((part, index, parts) => <span key={`${part}-${index}`} className={index === parts.length - 1 ? "is-file" : ""}>{part}</span>)}
+              </div>
+              <button className="icon-button" title="关闭文件" aria-label="关闭文件" onClick={() => { setOpenedFile(null); setSelectedFilePath(null); }}>×</button>
+            </div>
+            <FileCodeView name={openedFile.path.split(/[\\/]/).pop() ?? openedFile.path} content={openedFile.content} />
+          </aside>}
+
+          {tool && <aside className={`inspector ${tool === "files" ? "is-file-panel" : ""}`}>
+            {tool === "files" ? <div className="inspector-header inspector-header-compact"><h2>打开文件</h2><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div> : <div className="inspector-header"><div><span className="section-label">工具面板</span><h2>{tool === "diff" ? "文件差异" : "命令审批"}</h2></div><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div>}
             {tool === "diff" ? <div className="inspector-content">
               {diff ? <><div className="file-heading"><span className="file-type">TXT</span><div><strong>{diff.path.split(/[\\/]/).pop()}</strong><small>{diff.status === "created" ? "新文件" : "待修改"}</small></div></div><pre className="diff-view"><span className="diff-line diff-context">@@ 本地工作区</span>{diff.before && <span className="diff-line removed">- {diff.before}</span>}<span className="diff-line added">+ {diff.after}</span></pre><button className="primary-button full-button" onClick={() => void apply()}>确认并写入本机</button></> : <div className="empty-state"><div className="placeholder-icon">⊞</div><p>生成差异后，会在这里等待你的确认。</p><button className="secondary-button" onClick={() => void preview()}>生成差异</button></div>}
             </div> : tool === "files" ? <div className="inspector-content file-explorer">
-              {openedFile ? <div className="file-preview">
-                <div className="file-preview-header"><button type="button" className="icon-button" title="返回目录" aria-label="返回目录" onClick={() => setOpenedFile(null)}><span aria-hidden="true">←</span></button><strong>{openedFile.path.split(/[\\/]/).pop()}</strong></div>
-                <pre className="file-preview-body">{openedFile.content}</pre>
-              </div> : <>
-                {state?.projectPath && <div className="file-breadcrumb" title={state.projectPath}>{state.projectPath.split(/[\\/]/).filter(Boolean).join(" / ") || state.projectPath}</div>}
-                <div className="file-filter"><Search size={13} aria-hidden="true" /><input value={fileFilter} onChange={(event) => setFileFilter(event.target.value)} placeholder="筛选文件…" aria-label="筛选文件" /></div>
-                {fileNotice && <div className="file-notice" role="status">{fileNotice}</div>}
-                {state?.projectPath ? <div className="file-tree">
-                  {filteredWorkspaceFiles
-                    ? filteredWorkspaceFiles.length
-                      ? filteredWorkspaceFiles.map((entry) => <button type="button" className="file-row" key={entry.path} onClick={() => void openWorkspaceFile(entry)}><span className="file-row-chevron" aria-hidden="true" /><span className="file-row-icon" aria-hidden="true"><FileText size={14} /></span><span className="file-row-name">{entry.name}</span></button>)
-                      : <div className="file-notice">无匹配文件</div>
-                    : renderFileTree(state.projectPath, 0)}
-                </div> : <div className="file-empty"><FolderOpen size={30} /><strong>打开文件</strong><p>从工作区目录树中选择文件</p><button type="button" className="secondary-button" onClick={() => void chooseProject()}>选择文件夹…</button></div>}
-              </>}
+              <div className="file-filter"><Search size={13} aria-hidden="true" /><input value={fileFilter} onChange={(event) => setFileFilter(event.target.value)} placeholder="筛选文件…" aria-label="筛选文件" /></div>
+              {fileNotice && <div className="file-notice" role="status">{fileNotice}</div>}
+              {state?.projectPath ? <div className="file-tree">
+                {filteredWorkspaceFiles
+                  ? filteredWorkspaceFiles.length
+                    ? filteredWorkspaceFiles.map((entry) => <div className="file-tree-branch" key={entry.path}>{renderFileRow(entry, 0)}</div>)
+                    : <div className="file-notice">无匹配文件</div>
+                  : renderFileTree(state.projectPath, 0)}
+              </div> : <div className="file-empty"><FolderOpen size={26} /><strong>打开文件</strong><p>从工作区目录树中选择文件</p><button type="button" className="secondary-button" onClick={() => void chooseProject()}>选择文件夹…</button></div>}
             </div> : <div className="inspector-content">
               <label className="field-label" htmlFor="command-input">待执行命令</label><input id="command-input" value={command} onChange={(event) => setCommand(event.target.value)} />
               {pendingApproval ? <div className="approval-card"><div className="approval-warning">需要你的确认</div><code>{pendingApproval.command}</code><small>{pendingApproval.cwd}</small>{pendingApproval.reason && <p className="approval-reason">{pendingApproval.reason}</p>}<div className="approval-actions"><button className="secondary-button" onClick={() => void rejectApproval()}>拒绝</button><button className="primary-button" onClick={() => void executeApproval()}>允许一次</button></div></div> : <><p className="helper-text">命令只会在已选择的本机项目目录中运行。</p><button className="primary-button full-button" onClick={() => void requestApproval()}>请求执行</button></>}
