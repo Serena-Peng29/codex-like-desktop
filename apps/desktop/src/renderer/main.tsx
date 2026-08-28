@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, FilePenLine, FileText, Folder, FolderOpen, FolderPlus, Lightbulb, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, PanelRight, Paperclip, Pencil, Pin, PinOff, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, FilePenLine, FileText, Folder, FolderOpen, FolderPlus, Lightbulb, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, PanelRightOpen, Paperclip, Pencil, Pin, PinOff, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
 import "./styles.css";
 
 const brandFavicon = new URL("./brand-favicon.png", import.meta.url).href;
@@ -713,6 +713,7 @@ function App() {
   const [openedFile, setOpenedFile] = useState<{ path: string; content: string } | null>(null);
   const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
   const [editorWidth, setEditorWidth] = useState<number | null>(null);
+  const [fileTreeCollapsed, setFileTreeCollapsed] = useState(false);
   const [fileNotice, setFileNotice] = useState("");
   const [sending, setSending] = useState(false);
   const activeAssistantId = useRef<string | null>(null);
@@ -1597,7 +1598,7 @@ function App() {
         <header className="topbar">
           <div className="topbar-title"><span className="title-folder" aria-hidden="true"><FolderOpen size={15} /></span><span className="topbar-project">{conversationTitle}</span></div>
           <div className="topbar-actions">
-            <button className={`icon-button ${tool === "files" ? "is-active" : ""}`} title="打开文件" aria-label="打开文件" aria-expanded={tool === "files"} onClick={() => setTool(tool === "files" ? null : "files")}><PanelRight size={17} /></button>
+            <button className={`icon-button ${tool === "files" ? "is-active" : ""}`} title="打开文件" aria-label="打开文件" aria-expanded={tool === "files"} onClick={() => { if (tool === "files") setTool(null); else { setFileTreeCollapsed(false); setTool("files"); } }}><PanelRight size={17} /></button>
           </div>
         </header>
 
@@ -1661,16 +1662,17 @@ function App() {
           {tool === "files" && openedFile && <div className="editor-divider" role="separator" aria-orientation="vertical" aria-label="调整文件区域宽度" onPointerDown={(event) => { event.preventDefault(); resizingEditorRef.current = true; }} onDoubleClick={() => setEditorWidth(null)} />}
           {tool === "files" && openedFile && <aside className="file-editor" style={editorWidth === null ? undefined : { width: editorWidth, flex: "0 1 auto" }} aria-label="文件内容">
             <div className="file-editor-header">
+              {fileTreeCollapsed && <button className="icon-button" title="显示文件树" aria-label="显示文件树" onClick={() => setFileTreeCollapsed(false)}><PanelRightOpen size={15} /></button>}
               <div className="file-editor-crumb" title={openedFile.path}>
                 {openedFile.path.split(/[\\/]/).filter(Boolean).map((part, index, parts) => <span key={`${part}-${index}`} className={index === parts.length - 1 ? "is-file" : ""}>{part}</span>)}
               </div>
-              <button className="icon-button" title="关闭文件" aria-label="关闭文件" onClick={() => { setOpenedFile(null); setSelectedFilePath(null); }}>×</button>
+              <button className="icon-button" title="关闭文件" aria-label="关闭文件" onClick={() => { setOpenedFile(null); setSelectedFilePath(null); if (fileTreeCollapsed) setTool(null); }}>×</button>
             </div>
             <FileCodeView name={openedFile.path.split(/[\\/]/).pop() ?? openedFile.path} content={openedFile.content} />
           </aside>}
 
-          {tool && <aside className={`inspector ${tool === "files" ? "is-file-panel" : ""}`}>
-            {tool === "files" ? <div className="inspector-header inspector-header-compact"><h2>打开文件</h2><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div> : <div className="inspector-header"><div><span className="section-label">工具面板</span><h2>{tool === "diff" ? "文件差异" : "命令审批"}</h2></div><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div>}
+          {tool === "files" && !fileTreeCollapsed && <aside className="inspector is-file-panel">
+            {tool === "files" ? <div className="inspector-header inspector-header-compact"><h2>打开文件</h2><div className="inspector-header-actions"><button className="icon-button" title="收起文件树" aria-label="收起文件树" onClick={() => { setFileTreeCollapsed(true); if (!openedFile) setTool(null); }}><PanelRightClose size={15} /></button><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div></div> : <div className="inspector-header"><div><span className="section-label">工具面板</span><h2>{tool === "diff" ? "文件差异" : "命令审批"}</h2></div><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div>}
             {tool === "diff" ? <div className="inspector-content">
               {diff ? <><div className="file-heading"><span className="file-type">TXT</span><div><strong>{diff.path.split(/[\\/]/).pop()}</strong><small>{diff.status === "created" ? "新文件" : "待修改"}</small></div></div><pre className="diff-view"><span className="diff-line diff-context">@@ 本地工作区</span>{diff.before && <span className="diff-line removed">- {diff.before}</span>}<span className="diff-line added">+ {diff.after}</span></pre><button className="primary-button full-button" onClick={() => void apply()}>确认并写入本机</button></> : <div className="empty-state"><div className="placeholder-icon">⊞</div><p>生成差异后，会在这里等待你的确认。</p><button className="secondary-button" onClick={() => void preview()}>生成差异</button></div>}
             </div> : tool === "files" ? <div className="inspector-content file-explorer">
