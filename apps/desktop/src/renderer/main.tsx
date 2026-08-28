@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, FilePenLine, FileText, FolderOpen, FolderPlus, Lightbulb, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, Paperclip, Pencil, Pin, PinOff, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, FilePenLine, FileText, FolderOpen, FolderPlus, Lightbulb, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, PanelRight, Paperclip, Pencil, Pin, PinOff, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
 import "./styles.css";
 
 const brandFavicon = new URL("./brand-favicon.png", import.meta.url).href;
 
-type Tool = "diff" | "approval" | null;
+type Tool = "diff" | "approval" | "files" | null;
+type FileEntry = { name: string; path: string; kind: "dir" | "file" };
 type Diff = { path: string; before: string; after: string; status: string };
 type Approval = { approvalId: string; command: string; cwd: string; reason: string; source?: "local" | "app-server"; requestId?: number | string };
 type Permission = "ask" | "auto" | "full";
@@ -515,6 +516,11 @@ function App() {
   const [notice, setNotice] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
   const [tool, setTool] = useState<Tool>(null);
+  const [fileTree, setFileTree] = useState<Record<string, FileEntry[]>>({});
+  const [expandedDirs, setExpandedDirs] = useState<string[]>([]);
+  const [fileFilter, setFileFilter] = useState("");
+  const [openedFile, setOpenedFile] = useState<{ path: string; content: string } | null>(null);
+  const [fileNotice, setFileNotice] = useState("");
   const [sending, setSending] = useState(false);
   const activeAssistantId = useRef<string | null>(null);
   const conversationScrollRef = useRef<HTMLDivElement | null>(null);
@@ -549,6 +555,20 @@ function App() {
     document.addEventListener("pointerdown", closeMenusOnOutsidePointer);
     return () => document.removeEventListener("pointerdown", closeMenusOnOutsidePointer);
   }, []);
+
+  useEffect(() => {
+    setFileTree({});
+    setExpandedDirs([]);
+    setOpenedFile(null);
+    setFileFilter("");
+    setFileNotice("");
+  }, [state?.projectPath]);
+
+  useEffect(() => {
+    const root = state?.projectPath;
+    if (tool === "files" && root && !fileTree[root]) void listWorkspaceDirectory(root);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, state?.projectPath]);
 
   const displayNames = state?.threadDisplayNames ?? {};
   const projectMetaMap = state?.projectMeta ?? {};
@@ -1011,6 +1031,52 @@ function App() {
     }
   }
 
+  async function listWorkspaceDirectory(dirPath: string) {
+    try {
+      const listing = await window.desktop.listDirectory(dirPath);
+      setFileTree((current) => ({ ...current, [listing.path]: listing.entries }));
+    } catch {
+      setFileNotice("无法读取该目录");
+    }
+  }
+
+  async function toggleDirectory(entry: FileEntry) {
+    setFileNotice("");
+    setOpenedFile(null);
+    if (expandedDirs.includes(entry.path)) {
+      setExpandedDirs((dirs) => dirs.filter((dir) => dir !== entry.path));
+      return;
+    }
+    setExpandedDirs((dirs) => [...dirs, entry.path]);
+    if (!fileTree[entry.path]) await listWorkspaceDirectory(entry.path);
+  }
+
+  async function openWorkspaceFile(entry: FileEntry) {
+    setFileNotice("");
+    try {
+      setOpenedFile(await window.desktop.readFile(entry.path));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setFileNotice(message.includes("file_too_large") ? "文件过大，无法预览" : "无法读取该文件");
+    }
+  }
+
+  function renderFileTree(dirPath: string, depth: number): ReactNode {
+    return (fileTree[dirPath] ?? []).map((entry) => {
+      const expanded = expandedDirs.includes(entry.path);
+      return (
+        <div className="file-tree-branch" key={entry.path}>
+          <button type="button" className={`file-row ${entry.kind === "dir" ? "is-dir" : ""}`} style={{ paddingLeft: `${0.45 + depth * 0.85}rem` }} onClick={() => entry.kind === "dir" ? void toggleDirectory(entry) : void openWorkspaceFile(entry)}>
+            <span className="file-row-chevron" aria-hidden="true">{entry.kind === "dir" && <ChevronRight size={13} className={expanded ? "is-open" : ""} />}</span>
+            <span className="file-row-icon" aria-hidden="true">{entry.kind === "dir" ? <FolderOpen size={14} /> : <FileText size={14} />}</span>
+            <span className="file-row-name">{entry.name}</span>
+          </button>
+          {entry.kind === "dir" && expanded && renderFileTree(entry.path, depth + 1)}
+        </div>
+      );
+    });
+  }
+
   async function apply() {
     if (!diff) return;
     await window.desktop.applyDiff(diff);
@@ -1173,6 +1239,8 @@ function App() {
   const hasConversation = messages.length > 0;
   const activeHistoryEntry = state?.history.find((entry) => entry.id === state?.activeThreadId);
   const conversationTitle = activeHistoryEntry ? historyTitle(activeHistoryEntry, displayNames) : hasConversation ? "本地编程任务" : "新会话";
+  const normalizedFileFilter = fileFilter.trim().toLowerCase();
+  const filteredWorkspaceFiles = normalizedFileFilter ? Object.values(fileTree).flat().filter((entry) => entry.kind === "file" && entry.name.toLowerCase().includes(normalizedFileFilter)).slice(0, 200) : null;
 
   return (
     <div className="app-window">
@@ -1254,7 +1322,7 @@ function App() {
         <header className="topbar">
           <div className="topbar-title"><span className="title-folder" aria-hidden="true"><FolderOpen size={15} /></span><span className="topbar-project">{conversationTitle}</span><button className="title-menu" title="会话选项" aria-label="会话选项">•••</button></div>
           <div className="topbar-actions">
-            <button className="icon-button" title="打开工具" aria-label="打开工具" onClick={() => setTool(tool ? null : "diff")}>◫</button>
+            <button className={`icon-button ${tool === "files" ? "is-active" : ""}`} title="打开文件" aria-label="打开文件" aria-expanded={tool === "files"} onClick={() => setTool(tool === "files" ? null : "files")}><PanelRight size={17} /></button>
           </div>
         </header>
 
@@ -1316,9 +1384,25 @@ function App() {
           </main>
 
           {tool && <aside className="inspector">
-            <div className="inspector-header"><div><span className="section-label">工具面板</span><h2>{tool === "diff" ? "文件差异" : "命令审批"}</h2></div><button className="icon-button" title="关闭工具面板" aria-label="关闭工具面板" onClick={() => setTool(null)}>×</button></div>
+            <div className="inspector-header"><div><span className="section-label">{tool === "files" ? "工作区" : "工具面板"}</span><h2>{tool === "diff" ? "文件差异" : tool === "approval" ? "命令审批" : "打开文件"}</h2></div><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div>
             {tool === "diff" ? <div className="inspector-content">
               {diff ? <><div className="file-heading"><span className="file-type">TXT</span><div><strong>{diff.path.split(/[\\/]/).pop()}</strong><small>{diff.status === "created" ? "新文件" : "待修改"}</small></div></div><pre className="diff-view"><span className="diff-line diff-context">@@ 本地工作区</span>{diff.before && <span className="diff-line removed">- {diff.before}</span>}<span className="diff-line added">+ {diff.after}</span></pre><button className="primary-button full-button" onClick={() => void apply()}>确认并写入本机</button></> : <div className="empty-state"><div className="placeholder-icon">⊞</div><p>生成差异后，会在这里等待你的确认。</p><button className="secondary-button" onClick={() => void preview()}>生成差异</button></div>}
+            </div> : tool === "files" ? <div className="inspector-content file-explorer">
+              {openedFile ? <div className="file-preview">
+                <div className="file-preview-header"><button type="button" className="icon-button" title="返回目录" aria-label="返回目录" onClick={() => setOpenedFile(null)}><span aria-hidden="true">←</span></button><strong>{openedFile.path.split(/[\\/]/).pop()}</strong></div>
+                <pre className="file-preview-body">{openedFile.content}</pre>
+              </div> : <>
+                {state?.projectPath && <div className="file-breadcrumb" title={state.projectPath}>{state.projectPath.split(/[\\/]/).filter(Boolean).join(" / ") || state.projectPath}</div>}
+                <div className="file-filter"><Search size={13} aria-hidden="true" /><input value={fileFilter} onChange={(event) => setFileFilter(event.target.value)} placeholder="筛选文件…" aria-label="筛选文件" /></div>
+                {fileNotice && <div className="file-notice" role="status">{fileNotice}</div>}
+                {state?.projectPath ? <div className="file-tree">
+                  {filteredWorkspaceFiles
+                    ? filteredWorkspaceFiles.length
+                      ? filteredWorkspaceFiles.map((entry) => <button type="button" className="file-row" key={entry.path} onClick={() => void openWorkspaceFile(entry)}><span className="file-row-chevron" aria-hidden="true" /><span className="file-row-icon" aria-hidden="true"><FileText size={14} /></span><span className="file-row-name">{entry.name}</span></button>)
+                      : <div className="file-notice">无匹配文件</div>
+                    : renderFileTree(state.projectPath, 0)}
+                </div> : <div className="file-empty"><FolderOpen size={30} /><strong>打开文件</strong><p>从工作区目录树中选择文件</p><button type="button" className="secondary-button" onClick={() => void chooseProject()}>选择文件夹…</button></div>}
+              </>}
             </div> : <div className="inspector-content">
               <label className="field-label" htmlFor="command-input">待执行命令</label><input id="command-input" value={command} onChange={(event) => setCommand(event.target.value)} />
               {pendingApproval ? <div className="approval-card"><div className="approval-warning">需要你的确认</div><code>{pendingApproval.command}</code><small>{pendingApproval.cwd}</small>{pendingApproval.reason && <p className="approval-reason">{pendingApproval.reason}</p>}<div className="approval-actions"><button className="secondary-button" onClick={() => void rejectApproval()}>拒绝</button><button className="primary-button" onClick={() => void executeApproval()}>允许一次</button></div></div> : <><p className="helper-text">命令只会在已选择的本机项目目录中运行。</p><button className="primary-button full-button" onClick={() => void requestApproval()}>请求执行</button></>}

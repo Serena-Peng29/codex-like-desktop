@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { delimiter, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -97,6 +97,7 @@ let gatewayIsRemote = false;
 let gatewayServer: import("node:http").Server | null = null;
 const gatewayModel = process.env.MODEL ?? "gpt-4o-mini";
 const approvals = new Map<string, { command: string; cwd: string }>();
+const zhCollator = new Intl.Collator(["zh", "en"], { sensitivity: "base", numeric: true });
 const allowedCommands = new Set(["node", "npm", "pnpm", "git", "cargo", "python", "python3", "echo"]);
 let activeThreadId: string | null = null;
 const unassignedThreadIds = new Set<string>();
@@ -307,6 +308,23 @@ app.whenReady().then(async () => {
   ipcMain.handle("project:choose", async () => { const result = await dialog.showOpenDialog({ properties: ["openDirectory", "createDirectory"] }); if (!result.canceled && result.filePaths[0]) { projectPath = result.filePaths[0]; activeThreadId = null; await sidecar.request("workspace/set", { path: projectPath }).catch(() => undefined); persistClientState(); } return projectPath; });
   ipcMain.handle("project:set", async (_event, path: string) => { if (typeof path !== "string" || !path.trim()) throw new Error("invalid_project_path"); projectPath = path; activeThreadId = null; await sidecar.request("workspace/set", { path: projectPath }).catch(() => undefined); persistClientState(); return projectPath; });
   ipcMain.handle("project:clear", () => { projectPath = null; activeThreadId = null; persistClientState(); return undefined; });
+  ipcMain.handle("fs:list", (_event, dirPath: string) => {
+    if (typeof dirPath !== "string" || !dirPath.trim()) throw new Error("invalid_path");
+    const resolved = resolve(dirPath);
+    if (!existsSync(resolved) || !statSync(resolved).isDirectory()) throw new Error("not_a_directory");
+    const entries = readdirSync(resolved, { withFileTypes: true })
+      .map((entry) => ({ name: entry.name, path: join(resolved, entry.name), kind: entry.isDirectory() ? "dir" as const : "file" as const }))
+      .sort((a, b) => a.kind === b.kind ? zhCollator.compare(a.name, b.name) : a.kind === "dir" ? -1 : 1)
+      .slice(0, 2000);
+    return { path: resolved, entries };
+  });
+  ipcMain.handle("fs:read", (_event, filePath: string) => {
+    if (typeof filePath !== "string" || !filePath.trim()) throw new Error("invalid_path");
+    const resolved = resolve(filePath);
+    if (!existsSync(resolved) || !statSync(resolved).isFile()) throw new Error("not_a_file");
+    if (statSync(resolved).size > 512 * 1024) throw new Error("file_too_large");
+    return { path: resolved, content: readFileSync(resolved, "utf8") };
+  });
   ipcMain.handle("chat:history", () => listConversationHistory());
   ipcMain.handle("chat:load", async (_event, threadId: string, requestedProjectPath?: string | null) => {
     if (!threadId || typeof threadId !== "string") throw new Error("invalid_thread_id");

@@ -27,6 +27,8 @@ declare global {
       clearProject(): Promise<void>;
       chooseFolders(): Promise<string[]>;
       revealProject(path: string): Promise<void>;
+      listDirectory(path: string): Promise<{ path: string; entries: Array<{ name: string; path: string; kind: "dir" | "file" }> }>;
+      readFile(path: string): Promise<{ path: string; content: string }>;
       setProjectMeta(path: string, meta: { name?: string; folders?: string[] }): Promise<Record<string, { name?: string; folders?: string[] }>>;
       toggleProjectPin(path: string): Promise<string[]>;
       removeProject(path: string): Promise<void>;
