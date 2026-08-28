@@ -670,7 +670,8 @@ function App() {
         const right = document.querySelector(".file-editor")?.getBoundingClientRect().right ?? window.innerWidth;
         const body = document.querySelector(".workspace-body")?.getBoundingClientRect().width ?? window.innerWidth;
         const inspector = document.querySelector(".inspector")?.getBoundingClientRect().width ?? 0;
-        setEditorWidth(Math.max(280, Math.min((body - inspector - 5) * 0.8, right - event.clientX)));
+        const chatFloor = Math.max(body * 0.25, 530);
+        setEditorWidth(Math.max(280, Math.min(body - inspector - 5 - chatFloor, right - event.clientX)));
       }
     };
     const onPointerUp = () => { resizingSidebarRef.current = false; resizingEditorRef.current = false; };
@@ -1253,7 +1254,8 @@ function App() {
       if (current !== null) return current;
       const body = document.querySelector(".workspace-body")?.getBoundingClientRect().width ?? window.innerWidth * 0.6;
       const inspector = document.querySelector(".inspector")?.getBoundingClientRect().width ?? 0;
-      return Math.max(300, Math.round((body - inspector - 5) * 0.6));
+      const chatFloor = Math.max(body * 0.25, 530);
+      return Math.max(300, Math.round(Math.min((body - inspector - 5) * 0.6, body - inspector - 5 - chatFloor)));
     });
     try {
       setOpenedFile(await window.desktop.readFile(entry.path));
@@ -1593,7 +1595,7 @@ function App() {
           </main>
 
           {tool === "files" && openedFile && <div className="editor-divider" role="separator" aria-orientation="vertical" aria-label="调整文件区域宽度" onPointerDown={(event) => { event.preventDefault(); resizingEditorRef.current = true; }} onDoubleClick={() => setEditorWidth(null)} />}
-          {tool === "files" && openedFile && <aside className="file-editor" style={editorWidth === null ? undefined : { width: editorWidth, flex: "0 0 auto" }} aria-label="文件内容">
+          {tool === "files" && openedFile && <aside className="file-editor" style={editorWidth === null ? undefined : { width: editorWidth, flex: "0 1 auto" }} aria-label="文件内容">
             <div className="file-editor-header">
               <div className="file-editor-crumb" title={openedFile.path}>
                 {openedFile.path.split(/[\\/]/).filter(Boolean).map((part, index, parts) => <span key={`${part}-${index}`} className={index === parts.length - 1 ? "is-file" : ""}>{part}</span>)}

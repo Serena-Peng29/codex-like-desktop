@@ -89,7 +89,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .icon-button:hover { color: #e8e6e1; background: #252420; }
 
 .workspace-body { display: flex; min-height: 0; flex: 1; }
-.conversation-pane { display: flex; min-width: 20%; flex: 1; flex-direction: column; }
+.conversation-pane { display: flex; min-width: max(25%, 530px); flex: 1; flex-direction: column; }
 .thread-toolbar { display: flex; align-items: center; justify-content: space-between; min-height: 2.7rem; padding: 0 1.15rem; color: #77756f; border-bottom: 1px solid #22221f; font-size: .72rem; }
 .thread-toolbar > div { display: flex; align-items: center; gap: .5rem; }
 .live-pulse { width: .4rem; height: .4rem; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 .18rem rgb(229 92 54 / 15%); }
@@ -310,7 +310,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .quick-actions button span { color: #6e9ccc; }
 .usage-summary { margin-left: auto; color: #686762; font-size: .68rem; }
 
-.inspector { width: min(23rem, 36vw); flex: 0 0 min(23rem, 36vw); overflow: auto; border-left: 1px solid var(--hairline); background: var(--sidebar-bg); }
+.inspector { width: min(17.5rem, 24vw); flex: 0 0 min(17.5rem, 24vw); overflow: auto; border-left: 1px solid var(--hairline); background: var(--sidebar-bg); }
 .inspector.is-file-panel { display: flex; flex-direction: column; overflow: hidden; }
 .inspector-header { display: flex; align-items: flex-start; justify-content: space-between; padding: 1.1rem 1rem .9rem; border-bottom: 1px solid var(--hairline); }
 .inspector-header-compact { align-items: center; padding: .45rem .4rem .45rem .9rem; }
@@ -395,7 +395,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
   .topbar-title { max-width: 19rem; }
   .workspace-tabs { margin-left: .35rem; }
   .tab { padding-inline: .7rem; }
-  .inspector { width: min(20rem, 42vw); flex-basis: min(20rem, 42vw); }
+  .inspector { width: min(16rem, 34vw); flex-basis: min(16rem, 34vw); }
 }
 
 @media (max-width: 44rem) {
