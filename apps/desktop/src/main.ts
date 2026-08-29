@@ -381,7 +381,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("window:close", () => BrowserWindow.getFocusedWindow()?.close());
   ipcMain.handle("app:state", async () => {
     const history = await listConversationHistory();
-    return { projectPath, activeThreadId, unassignedThreadIds: [...unassignedThreadIds], threadProjectPaths: Object.fromEntries(threadProjectPaths), threadDisplayNames: Object.fromEntries(threadDisplayNames), pinnedThreadIds: [...pinnedThreadIds], projectMeta: Object.fromEntries(projectMeta), pinnedProjects: [...pinnedProjects], removedProjects: [...removedProjects], history, sidecar: sidecar.status, gateway: gatewayUrl, gatewayMode: gatewayIsRemote ? "remote" : "local" };
+    return { projectPath, activeThreadId, activeTurnThreadId: activeTurn?.threadId ?? null, activeTurnId: activeTurn?.turnId ?? null, unassignedThreadIds: [...unassignedThreadIds], threadProjectPaths: Object.fromEntries(threadProjectPaths), threadDisplayNames: Object.fromEntries(threadDisplayNames), pinnedThreadIds: [...pinnedThreadIds], projectMeta: Object.fromEntries(projectMeta), pinnedProjects: [...pinnedProjects], removedProjects: [...removedProjects], history, sidecar: sidecar.status, gateway: gatewayUrl, gatewayMode: gatewayIsRemote ? "remote" : "local" };
   });
   // Re-adding a previously removed project must lift the removal marker, or the
   // sidebar would keep hiding the group and the next launch would drop it again;

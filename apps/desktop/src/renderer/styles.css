@@ -392,7 +392,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .approval-card code { display: block; padding: .55rem; overflow-wrap: anywhere; border-radius: .35rem; color: var(--text-secondary); background: var(--surface-bubble); font-family: "Cascadia Code", Consolas, monospace; font-size: .68rem; line-height: 1.5; }
 .approval-card small { display: block; margin-top: .55rem; overflow: hidden; color: rgb(229 92 54 / 60%); font-size: .65rem; text-overflow: ellipsis; white-space: nowrap; }
 .approval-reason { margin: .55rem 0 0; color: var(--muted); font-size: .68rem; line-height: 1.45; }
-.approval-actions { display: flex; justify-content: flex-end; gap: .45rem; margin-top: .75rem; }
+.approval-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .45rem; margin-top: .75rem; }
+.approval-actions .primary-button { border: 1px solid rgb(52 211 153 / 55%); color: #08130f; background: var(--success); box-shadow: 0 .2rem .7rem rgb(52 211 153 / 18%); }
+.approval-actions .primary-button:hover { color: #06100c; background: #72e0b5; }
+.approval-actions .secondary-button, .approval-actions .primary-button { flex: 0 1 auto; white-space: nowrap; }
+.is-approval-panel .inspector-content { min-width: 0; }
 .files-placeholder { padding: 14vh 1rem; text-align: center; }
 .files-placeholder h2 { margin: .9rem 0 .35rem; color: #e2e0db; font-size: 1.1rem; }
 .files-placeholder p { margin: 0 auto 1rem; max-width: 24rem; color: #85837d; font-size: .78rem; line-height: 1.6; }
@@ -889,6 +893,11 @@ body, .app-window, .app-shell, .workspace, .workspace-body, .conversation-pane {
   .composer { min-height: 7.8rem; border-radius: .75rem; }
   .empty-conversation .composer { min-height: 7.2rem; }
   .composer textarea { min-height: 3.7rem; }
+  .is-approval-panel { max-height: none; }
+  .is-approval-panel .inspector-content { padding: .8rem; }
+  .approval-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .approval-actions .primary-button { grid-column: 1 / -1; order: -1; width: 100%; }
+  .approval-actions .secondary-button { width: 100%; }
 }
 
 /* Sidebar search, view menu, pinning, session/project menus, and dialogs. */

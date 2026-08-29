@@ -146,6 +146,8 @@ type Approval = {
   reason?: string;
   source?: "local" | "app-server";
   requestId?: number | string;
+  threadId?: string;
+  turnId?: string;
   method?: string;
   kind: ApprovalKind;
   detail?: string;
@@ -200,7 +202,9 @@ function approvalPayload(approval: Approval, action: "accept" | "session" | "dec
 function approvalFromServerRequest(request: { requestId: number | string; method: string; params: Record<string, unknown> }): Approval | null {
   const params = request.params ?? {};
   const reason = typeof params.reason === "string" && params.reason ? params.reason : undefined;
-  const base = { approvalId: String(request.requestId), requestId: request.requestId, source: "app-server" as const, method: request.method, reason, command: "", cwd: "" };
+  const threadId = typeof params.threadId === "string" ? params.threadId : undefined;
+  const turnId = typeof params.turnId === "string" ? params.turnId : undefined;
+  const base = { approvalId: String(request.requestId), requestId: request.requestId, threadId, turnId, source: "app-server" as const, method: request.method, reason, command: "", cwd: "" };
   switch (request.method) {
     case "item/commandExecution/requestApproval":
       return { ...base, kind: "command", command: typeof params.command === "string" && params.command ? params.command : "Codex 请求执行一项命令", cwd: typeof params.cwd === "string" && params.cwd ? params.cwd : "当前项目目录" };
@@ -500,7 +504,35 @@ function latestThreadMessages(payload: { thread?: { turns?: Array<{ items?: Arra
     }
     currentAssistant = undefined;
   }
-  return entries;
+  // A single turn can persist an approval preamble and its post-approval final
+  // answer as separate agent messages. They are one logical assistant reply in
+  // the chat, so merge adjacent assistant entries while preserving part order.
+  return entries.reduce<HistoryMessage[]>((merged, entry) => {
+    const previous = merged[merged.length - 1];
+    if (entry.role === "assistant" && previous?.role === "assistant") {
+      previous.text += entry.text;
+      previous.parts = [...(previous.parts ?? []), ...(entry.parts ?? [])];
+      return merged;
+    }
+    merged.push(entry);
+    return merged;
+  }, []);
+}
+
+function coalesceAssistantMessages(messages: ChatMessage[]) {
+  return messages.reduce<ChatMessage[]>((merged, message) => {
+    const previous = merged[merged.length - 1];
+    if (message.role === "assistant" && previous?.role === "assistant") {
+      previous.content = [previous.content, message.content].filter(Boolean).join("\n\n");
+      previous.parts = [...(previous.parts ?? []), ...(message.parts ?? [])];
+      previous.streaming = Boolean(previous.streaming || message.streaming);
+      previous.completedAt = message.completedAt ?? previous.completedAt;
+      previous.usage = message.usage ?? previous.usage;
+      return merged;
+    }
+    merged.push({ ...message });
+    return merged;
+  }, []);
 }
 
 function formatMessageTime(timestamp?: number) {
@@ -795,6 +827,8 @@ function App() {
   const [state, setState] = useState<{
     projectPath: string | null;
     activeThreadId: string | null;
+    activeTurnThreadId?: string | null;
+    activeTurnId?: string | null;
     unassignedThreadIds?: string[];
     threadProjectPaths?: Record<string, string | null>;
     threadDisplayNames?: Record<string, string>;
@@ -854,6 +888,9 @@ function App() {
   const [fileNotice, setFileNotice] = useState("");
   const [sending, setSending] = useState(false);
   const activeAssistantId = useRef<string | null>(null);
+  const assistantIdsByThread = useRef(new Map<string, string>());
+  const approvalsByThread = useRef(new Map<string, Approval>());
+  const activeThreadIdRef = useRef<string | null>(null);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
   const conversationScrollRef = useRef<HTMLDivElement | null>(null);
   const resizingSidebarRef = useRef(false);
@@ -971,13 +1008,24 @@ function App() {
     if (!window.desktop) return;
     void window.desktop.state().then(async (nextState) => {
       setState(nextState);
+      activeThreadIdRef.current = nextState.activeThreadId;
+      setSending(Boolean(nextState.activeThreadId && nextState.activeTurnThreadId === nextState.activeThreadId));
       if (!nextState.activeThreadId) return;
       try {
         const entries = latestThreadMessages(await window.desktop.loadThread(nextState.activeThreadId));
         if (entries.length) {
           const chat = entriesToChatMessages(entries);
-          setMessages(chat);
-          void hydrateImagePreviews(chat);
+          if (nextState.activeTurnThreadId === nextState.activeThreadId) {
+            const assistantId = `restored-${nextState.activeThreadId}`;
+            assistantIdsByThread.current.set(nextState.activeThreadId, assistantId);
+            activeAssistantId.current = assistantId;
+            const restored = chat.some((message) => message.id === assistantId) ? chat : [...chat, { id: assistantId, role: "assistant" as const, content: "", reasoning: [], tool: null, streaming: true }];
+            setMessages(restored);
+            void hydrateImagePreviews(restored);
+          } else {
+            setMessages(chat);
+            void hydrateImagePreviews(chat);
+          }
         }
       } catch { /* a stale persisted thread should not prevent launch */ }
       try {
@@ -992,8 +1040,11 @@ function App() {
     return window.desktop.onApproval((request) => {
       const approval = approvalFromServerRequest(request);
       if (!approval) return;
-      setPendingApproval(approval);
-      setTool("approval");
+      if (approval.threadId) approvalsByThread.current.set(approval.threadId, approval);
+      if (!approval.threadId || approval.threadId === activeThreadIdRef.current) {
+        setPendingApproval(approval);
+        setTool("approval");
+      }
     });
   }, []);
 
@@ -1001,7 +1052,8 @@ function App() {
     if (!window.desktop?.onMessageDelta) return;
     return window.desktop.onMessageDelta((event) => {
       if (typeof event.delta !== "string") return;
-      const id = activeAssistantId.current;
+      const threadId = typeof event.threadId === "string" ? event.threadId : undefined;
+      const id = threadId && threadId === activeThreadIdRef.current ? assistantIdsByThread.current.get(threadId) : undefined;
       if (!id) return;
       setMessages((current) => current.map((message) => {
         if (message.id !== id) return message;
@@ -1031,7 +1083,17 @@ function App() {
         setGoalInputMode(false);
         return;
       }
-      const id = activeAssistantId.current;
+      if (event.method === "serverRequest/resolved") {
+        const requestId = String(params.requestId ?? "");
+        for (const [threadId, approval] of approvalsByThread.current) {
+          if (String(approval.requestId ?? "") !== requestId) continue;
+          approvalsByThread.current.delete(threadId);
+          if (threadId === activeThreadIdRef.current) setPendingApproval(undefined);
+        }
+        return;
+      }
+      const threadId = typeof params.threadId === "string" ? params.threadId : undefined;
+      const id = threadId && threadId === activeThreadIdRef.current ? assistantIdsByThread.current.get(threadId) : undefined;
       if (!id) return;
       if (event.method === "item/reasoning/summaryTextDelta" || event.method === "item/reasoning/textDelta") {
         const index = Number.isInteger(params.summaryIndex) ? Number(params.summaryIndex) : (Number.isInteger(params.contentIndex) ? Number(params.contentIndex) : 0);
@@ -1094,7 +1156,8 @@ function App() {
   useEffect(() => {
     if (!window.desktop?.onAppServerRequest) return;
     return window.desktop.onAppServerRequest((request) => {
-      const id = activeAssistantId.current;
+      const threadId = typeof request.params?.threadId === "string" ? request.params.threadId : undefined;
+      const id = threadId && threadId === activeThreadIdRef.current ? assistantIdsByThread.current.get(threadId) : undefined;
       const nextTool = toolFromRequest(request);
       if (!id || !nextTool) return;
       setMessages((current) => current.map((message) => message.id === id ? { ...message, tool: nextTool, parts: [...(message.parts ?? []), { id: `tool-${nextTool.id}`, sourceId: nextTool.sourceId, kind: "tool", tool: nextTool }] } : message));
@@ -1163,10 +1226,21 @@ function App() {
     try {
       const entries = latestThreadMessages(await window.desktop.loadThread(threadId, projectPath));
       const chat = entriesToChatMessages(entries);
-      setMessages(chat);
+      const nextState = await window.desktop.state();
+      const isRunning = nextState.activeTurnThreadId === threadId;
+      const runningAssistantId = assistantIdsByThread.current.get(threadId);
+      const restored = isRunning && runningAssistantId && !chat.some((message) => message.id === runningAssistantId)
+        ? [...chat, { id: runningAssistantId, role: "assistant" as const, content: "", reasoning: [], tool: null, streaming: true }]
+        : chat;
+      setMessages(restored);
+      activeThreadIdRef.current = threadId;
+      activeAssistantId.current = isRunning ? runningAssistantId ?? null : null;
+      setSending(isRunning);
+      setPendingApproval(approvalsByThread.current.get(threadId));
+      if (approvalsByThread.current.has(threadId)) setTool("approval");
       void hydrateImagePreviews(chat);
       setErrorMessage("");
-      setState(await window.desktop.state());
+      setState(nextState);
       const { goal } = await window.desktop.getGoal().catch(() => ({ goal: null }) as { goal?: { objective?: string } | null });
       setGoalText(goal?.objective?.trim() || null);
       setGoalInputMode(false);
@@ -1199,6 +1273,16 @@ function App() {
     if (message) setRecentPrompts((current) => [message, ...current.filter((prompt) => prompt !== message)].slice(0, 5));
     const assistantId = `message-${Date.now()}-${Math.random().toString(36).slice(2)}`;
     activeAssistantId.current = assistantId;
+    let turnThreadId = state?.activeThreadId ?? null;
+    if (turnThreadId) assistantIdsByThread.current.set(turnThreadId, assistantId);
+    void window.desktop.state().then((nextState) => {
+      if (nextState.activeThreadId && nextState.activeTurnThreadId === nextState.activeThreadId) {
+        turnThreadId = nextState.activeThreadId;
+        assistantIdsByThread.current.set(turnThreadId, assistantId);
+        activeThreadIdRef.current = turnThreadId;
+        setState(nextState);
+      }
+    }).catch(() => undefined);
     setMessages((current) => [...current, {
       id: `user-${assistantId}`,
       role: "user",
@@ -1234,8 +1318,10 @@ function App() {
       setMessages((current) => current.map((item) => item.id === assistantId ? { ...item, content: `请求失败：${message}`, parts: [{ id: `error-${assistantId}`, kind: "text", text: `请求失败：${message}`, streaming: false }], completedAt: Date.now(), streaming: false } : item));
       setNotice(message);
     } finally {
-      activeAssistantId.current = null;
-      setSending(false);
+      if (activeThreadIdRef.current === turnThreadId) {
+        activeAssistantId.current = null;
+        setSending(false);
+      }
       // 计划模式只作用于一次提问：无论成败，本轮结束后都退出 plan。
       if (planForThisTurn) setPlanMode(false);
     }
@@ -1528,6 +1614,7 @@ function App() {
   async function respondToApproval(approval: Approval, action: "accept" | "session" | "decline" | "cancel") {
     if (approval.source !== "app-server" || approval.requestId === undefined || !approval.method) return;
     await window.desktop.respondApproval(approval.requestId, approval.method, approvalPayload(approval, action));
+    if (approval.threadId) approvalsByThread.current.delete(approval.threadId);
   }
 
   async function executeApproval() {
@@ -1693,7 +1780,8 @@ function App() {
     </div>;
   };
 
-  const hasConversation = messages.length > 0;
+  const displayMessages = coalesceAssistantMessages(messages);
+  const hasConversation = displayMessages.length > 0;
   const activeHistoryEntry = state?.history.find((entry) => entry.id === state?.activeThreadId);
   const conversationTitle = activeHistoryEntry ? historyTitle(activeHistoryEntry, displayNames) : hasConversation ? "本地编程任务" : "新会话";
   const normalizedFileFilter = fileFilter.trim().toLowerCase();
@@ -1797,7 +1885,7 @@ function App() {
                     {recentPrompts.length ? recentPrompts.map((prompt) => <button className="recent-prompt" key={`recent-${prompt}`} onClick={() => setInput(prompt)}><span className="recent-icon">◷</span><span>{prompt}</span><span className="recent-arrow" aria-hidden="true">↗</span></button>) : <div className="recent-empty">发送过的提示会出现在这里</div>}
                   </div>
                 </div>}
-                {messages.map((message) => message.role === "user" ? <div className="message user-message" key={message.id}><div className="message-content"><UserMessageContent message={message} onPreview={(src, name) => setPreviewImage({ src, name })} /></div></div> : <div className="message assistant-message" key={message.id}><div className="message-content"><div className="assistant-identity"><img src={brandFavicon} alt="" aria-hidden="true" /><span>Codex Harness</span></div><AssistantParts message={message} /><div className="message-footer">{message.streaming ? <span className="thinking-status"><span>思考中</span><span className="stream-caret" aria-hidden="true" /></span> : <><button type="button" className="message-copy" title="复制回复" aria-label="复制回复" onClick={() => void navigator.clipboard?.writeText(message.content)}><Copy size={18} /></button>{message.completedAt !== undefined && <time className="message-time" dateTime={new Date(message.completedAt).toISOString()}>{formatMessageTime(message.completedAt)}</time>}</>}</div></div></div>)}
+                {displayMessages.map((message) => message.role === "user" ? <div className="message user-message" key={message.id}><div className="message-content"><UserMessageContent message={message} onPreview={(src, name) => setPreviewImage({ src, name })} /></div></div> : <div className="message assistant-message" key={message.id}><div className="message-content"><div className="assistant-identity"><img src={brandFavicon} alt="" aria-hidden="true" /><span>Codex Harness</span></div><AssistantParts message={message} /><div className="message-footer">{message.streaming ? <span className="thinking-status"><span>思考中</span><span className="stream-caret" aria-hidden="true" /></span> : <><button type="button" className="message-copy" title="复制回复" aria-label="复制回复" onClick={() => void navigator.clipboard?.writeText(message.content)}><Copy size={18} /></button>{message.completedAt !== undefined && <time className="message-time" dateTime={new Date(message.completedAt).toISOString()}>{formatMessageTime(message.completedAt)}</time>}</>}</div></div></div>)}
                 {(diff || pendingApproval) && <div className="activity-strip"><span>◈</span><span>{diff ? "有一项文件差异待确认" : "有一条命令等待审批"}</span><button onClick={() => setTool(diff ? "diff" : "approval")}>查看</button></div>}
               </div>
             </div>
@@ -1852,7 +1940,7 @@ function App() {
             <FileCodeView name={openedFile.path.split(/[\\/]/).pop() ?? openedFile.path} content={openedFile.content} />
           </aside>}
 
-          {tool === "files" && !fileTreeCollapsed && <aside className="inspector is-file-panel">
+          {tool !== null && (tool !== "files" || !fileTreeCollapsed) && <aside className={`inspector ${tool === "files" ? "is-file-panel" : "is-approval-panel"}`}>
             {tool === "files" ? <div className="inspector-header inspector-header-compact"><h2>打开文件</h2><div className="inspector-header-actions"><button className="icon-button" title="收起文件树" aria-label="收起文件树" onClick={() => { setFileTreeCollapsed(true); if (!openedFile) setTool(null); }}><PanelRightClose size={15} /></button><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div></div> : <div className="inspector-header"><div><span className="section-label">工具面板</span><h2>{tool === "diff" ? "文件差异" : "命令审批"}</h2></div><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div>}
             {tool === "diff" ? <div className="inspector-content">
               {diff ? <><div className="file-heading"><span className="file-type">TXT</span><div><strong>{diff.path.split(/[\\/]/).pop()}</strong><small>{diff.status === "created" ? "新文件" : "待修改"}</small></div></div><pre className="diff-view"><span className="diff-line diff-context">@@ 本地工作区</span>{diff.before && <span className="diff-line removed">- {diff.before}</span>}<span className="diff-line added">+ {diff.after}</span></pre><button className="primary-button full-button" onClick={() => void apply()}>确认并写入本机</button></> : <div className="empty-state"><div className="placeholder-icon">⊞</div><p>生成差异后，会在这里等待你的确认。</p><button className="secondary-button" onClick={() => void preview()}>生成差异</button></div>}

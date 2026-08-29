@@ -10,6 +10,8 @@ declare global {
       state(): Promise<{
         projectPath: string | null;
         activeThreadId: string | null;
+        activeTurnThreadId?: string | null;
+        activeTurnId?: string | null;
         unassignedThreadIds?: string[];
         threadProjectPaths?: Record<string, string | null>;
         threadDisplayNames?: Record<string, string>;
