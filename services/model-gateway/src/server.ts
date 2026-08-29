@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { Readable, Transform } from "node:stream";
-import { TestLedger } from "@codex-like/billing";
+import { PersistentLedger, TestLedger, type Account } from "@codex-like/billing";
 import { verifyJwt } from "@codex-like/shared";
 
 // Two modes share this server:
@@ -15,12 +15,23 @@ import { verifyJwt } from "@codex-like/shared";
 type ChatRequest = { userId?: string; model?: string; input?: string };
 type UpstreamUsage = { inputTokens: number; outputTokens: number };
 
+// What the gateway needs from a ledger. Both TestLedger (transient) and
+// PersistentLedger (file-backed, P1-3) satisfy it structurally; the optional
+// meta on charge lets the persistent ledger record token usage per entry.
+type LedgerLike = {
+  get(id: string): Account;
+  charge(id: string, credits: number, meta?: { inputTokens?: number; outputTokens?: number; source?: string }): { ok: boolean } & Record<string, unknown>;
+  createTestAccount?(id?: string, credits?: number): unknown;
+  addOverage?(id: string, credits: number): unknown;
+};
+
 export type GatewayOptions = {
   jwtSecret?: string;
   upstreamBaseUrl?: string;
   upstreamApiKey?: string;
   models?: string[];
-  ledger?: TestLedger;
+  ledger?: LedgerLike;
+  ledgerPath?: string;
   devCredits?: number;
   rateLimitPerMinute?: number;
   requestBytesLimit?: number;
@@ -35,6 +46,7 @@ function envConfig(): GatewayConfig {
     upstreamBaseUrl: process.env.GATEWAY_UPSTREAM_BASE_URL?.replace(/\/+$/, ""),
     upstreamApiKey: process.env.GATEWAY_UPSTREAM_API_KEY,
     models: models?.length ? models : undefined,
+    ledgerPath: process.env.GATEWAY_LEDGER_PATH,
     devCredits: Number(process.env.GATEWAY_DEV_CREDITS ?? 200_000),
     rateLimitPerMinute: Number(process.env.GATEWAY_RATE_LIMIT_PER_MIN ?? 30),
     requestBytesLimit: Number(process.env.GATEWAY_REQUEST_BYTES_LIMIT ?? 32_000_000)
@@ -95,11 +107,15 @@ function extractJsonUsage(usage: Record<string, unknown> | undefined): UpstreamU
 export function createGatewayServer(options: GatewayOptions = {}) {
   const config: GatewayConfig = { ...envConfig(), ...Object.fromEntries(Object.entries(options).filter(([, value]) => value !== undefined)) };
   const gatewayMode = Boolean(config.jwtSecret && config.upstreamBaseUrl && config.upstreamApiKey);
-  const ledger = config.ledger ?? new TestLedger();
-  if (!config.ledger) {
-    try { ledger.get("test-user"); } catch {
-      ledger.createTestAccount("test-user", 120);
-      ledger.addOverage("test-user", Number(process.env.TEST_OVERAGE_CREDITS ?? 0));
+  // GATEWAY_LEDGER_PATH swaps the transient fake ledger for the file-backed
+  // one: balances and usage entries survive restarts and become the
+  // server-side source of truth for billing (P1-3).
+  const ledger: LedgerLike = config.ledger ?? (config.ledgerPath ? new PersistentLedger(config.ledgerPath) : new TestLedger());
+  if (!config.ledger && !config.ledgerPath) {
+    const mockLedger = ledger as TestLedger;
+    try { mockLedger.get("test-user"); } catch {
+      mockLedger.createTestAccount("test-user", 120);
+      mockLedger.addOverage("test-user", Number(process.env.TEST_OVERAGE_CREDITS ?? 0));
     }
   }
   const rateWindow = new Map<string, number[]>();
@@ -121,16 +137,17 @@ export function createGatewayServer(options: GatewayOptions = {}) {
     return false;
   }
 
-  // Fake-ledger provisioning: a real billing service (P1-3) owns accounts;
-  // here an unseen JWT subject starts with dev credits so 402 stays testable.
+  // Fake-ledger provisioning: a real billing service owns accounts; here an
+  // unseen JWT subject starts with dev credits so 402 stays testable.
   function provision(userId: string) {
-    try { ledger.get(userId); } catch { ledger.createTestAccount(userId, config.devCredits); }
+    try { ledger.get(userId); } catch { ledger.createTestAccount?.(userId, config.devCredits); }
   }
 
   function chargeUsage(userId: string, usage: UpstreamUsage | null) {
     if (!usage) return;
     try {
-      const charged = ledger.charge(userId, usage.inputTokens + usage.outputTokens);
+      const credits = usage.inputTokens + usage.outputTokens;
+      const charged = ledger.charge(userId, credits, { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, source: "responses" });
       if (!charged.ok) console.warn(`[model-gateway] post-stream charge failed for ${userId}: ${JSON.stringify(charged)}`);
     } catch (error) {
       console.warn(`[model-gateway] charge error for ${userId}: ${error instanceof Error ? error.message : String(error)}`);

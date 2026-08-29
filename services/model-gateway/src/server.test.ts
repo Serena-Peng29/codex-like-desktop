@@ -1,7 +1,10 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { createServer as createTcpServer, type Server } from "node:http";
 import { createHmac } from "node:crypto";
-import { TestLedger } from "@codex-like/billing";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { PersistentLedger, TestLedger } from "@codex-like/billing";
 import { createGatewayServer } from "./server.js";
 
 function listen(server: Server) {
@@ -66,13 +69,13 @@ describe("gateway mode (jwt + upstream forwarding)", () => {
       });
     });
     const upstreamBase = await listen(upstream);
-    gateway = createGatewayServer({ jwtSecret: secret, upstreamBaseUrl: upstreamBase, upstreamApiKey: "upstream-key", ledger, rateLimitPerMinute: 0, ...options } as never);
+    gateway = createGatewayServer({ jwtSecret: secret, upstreamBaseUrl: upstreamBase, upstreamApiKey: "upstream-key", rateLimitPerMinute: 0, ...options } as never);
     return listen(gateway);
   }
 
   it("forwards to the upstream with the server-side key and charges the streamed usage", async () => {
     ledger.createTestAccount("alice", 1000);
-    const base = await startGateway();
+    const base = await startGateway({ ledger });
     const response = await fetch(`${base}/v1/responses`, { method: "POST", headers: { authorization: `Bearer ${sign("alice")}`, "content-type": "application/json" }, body: JSON.stringify({ model: "gpt-5.6-sol", stream: true, input: "hi" }) });
     expect(response.status).toBe(200);
     const text = await response.text();
@@ -100,7 +103,7 @@ describe("gateway mode (jwt + upstream forwarding)", () => {
 
   it("blocks a caller whose credits are exhausted before forwarding", async () => {
     ledger.createTestAccount("bob", 0);
-    const base = await startGateway();
+    const base = await startGateway({ ledger });
     const response = await fetch(`${base}/v1/responses`, { method: "POST", headers: { authorization: `Bearer ${sign("bob")}`, "content-type": "application/json" }, body: JSON.stringify({ input: "hi" }) });
     expect(response.status).toBe(402);
     expect(await response.text()).toContain("insufficient_credits");
@@ -152,5 +155,24 @@ describe("gateway mode (jwt + upstream forwarding)", () => {
     expect(response.status).toBe(200);
     await response.text();
     expect(ledger.get("dave").packageCredits).toBe(1000 - 9);
+  });
+
+  it("records charges in the file-backed ledger with token usage metadata", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gw-ledger-"));
+    const ledgerPath = join(dir, "ledger.json");
+    try {
+      const base = await startGateway({ ledgerPath });
+      const response = await fetch(`${base}/v1/responses`, { method: "POST", headers: { authorization: `Bearer ${sign("frank")}`, "content-type": "application/json" }, body: JSON.stringify({ input: "hi" }) });
+      expect(response.status).toBe(200);
+      await response.text();
+      // Reload from disk: an unseen JWT subject was provisioned with dev
+      // credits and the streamed usage was charged and journaled.
+      const reloaded = new PersistentLedger(ledgerPath);
+      expect(reloaded.get("frank").packageCredits).toBe(200_000 - 18);
+      const charge = reloaded.entriesFor("frank").find((entry) => entry.type === "charge");
+      expect(charge).toMatchObject({ type: "charge", userId: "frank", meta: { inputTokens: 11, outputTokens: 7, source: "responses" } });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
