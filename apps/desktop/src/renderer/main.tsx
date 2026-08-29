@@ -1041,7 +1041,11 @@ function App() {
       const approval = approvalFromServerRequest(request);
       if (!approval) return;
       if (approval.threadId) approvalsByThread.current.set(approval.threadId, approval);
-      if (!approval.threadId || approval.threadId === activeThreadIdRef.current) {
+      // An approval we cannot attribute to another open thread must stay
+      // visible: hiding it leaves the server request unanswered and the turn
+      // stalls forever. activeThreadId is null for the first message of a
+      // fresh session until a delta or state refresh adopts the new thread.
+      if (!approval.threadId || approval.threadId === activeThreadIdRef.current || activeThreadIdRef.current === null) {
         setPendingApproval(approval);
         setTool("approval");
       }
@@ -1053,6 +1057,14 @@ function App() {
     return window.desktop.onMessageDelta((event) => {
       if (typeof event.delta !== "string") return;
       const threadId = typeof event.threadId === "string" ? event.threadId : undefined;
+      // The renderer learns the thread of a fresh session's first turn only
+      // after stream() resolves, which never happens while an approval is
+      // pending. Adopt the streaming turn's thread from its first delta so
+      // text and approval cards render from the start.
+      if (threadId && activeThreadIdRef.current === null && activeAssistantId.current) {
+        activeThreadIdRef.current = threadId;
+        assistantIdsByThread.current.set(threadId, activeAssistantId.current);
+      }
       const id = threadId && threadId === activeThreadIdRef.current ? assistantIdsByThread.current.get(threadId) : undefined;
       if (!id) return;
       setMessages((current) => current.map((message) => {
