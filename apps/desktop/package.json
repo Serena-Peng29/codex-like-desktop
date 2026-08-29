@@ -11,6 +11,9 @@
   "build": {
     "appId": "com.way2agi.code",
     "productName": "Codex Harness",
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/**",
       "package.json"

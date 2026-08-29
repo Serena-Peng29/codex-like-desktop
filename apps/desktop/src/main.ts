@@ -437,18 +437,23 @@ async function startSidecar() {
 
 app.whenReady().then(async () => {
   loadClientState();
-  // Login is in play only when services/api is explicitly configured or a
-  // stored session exists; without either, the Phase 0 demo flow is unchanged.
+  // Login is in play when services/api is configured (always true for a
+  // packaged build — the product has no offline demo mode) or a stored
+  // session exists; otherwise the Phase 0 demo flow keeps working in dev.
   let apiConfigured = false;
-  try { apiConfigured = Boolean(process.env.API_BASE_URL) || Boolean(loadRefreshToken()); } catch { apiConfigured = false; }
+  try { apiConfigured = app.isPackaged || Boolean(process.env.API_BASE_URL) || Boolean(loadRefreshToken()); } catch { apiConfigured = app.isPackaged; }
   if (apiConfigured) authRequired = !(await tryRestoreSession());
   const configuredGateway = process.env.MODEL_GATEWAY_BASE_URL?.replace(/\/+$/, "");
   if (configuredGateway) { gatewayUrl = configuredGateway; gatewayIsRemote = true; }
-  else {
-    const { createGatewayServer } = await import(pathToFileURL(join(projectRoot, "services/model-gateway/dist/server.js")).href) as { createGatewayServer: () => import("node:http").Server };
-    gatewayServer = createGatewayServer();
-    await new Promise<void>((resolvePromise) => gatewayServer!.listen(0, "127.0.0.1", () => resolvePromise()));
-    const address = gatewayServer.address(); if (address && typeof address !== "string") gatewayUrl = `http://127.0.0.1:${address.port}`;
+  else if (!app.isPackaged) {
+    // The embedded mock gateway is a dev artifact; packaged builds talk to the
+    // deployed backend only and ship without services/ on disk.
+    try {
+      const { createGatewayServer } = await import(pathToFileURL(join(projectRoot, "services/model-gateway/dist/server.js")).href) as { createGatewayServer: () => import("node:http").Server };
+      gatewayServer = createGatewayServer();
+      await new Promise<void>((resolvePromise) => gatewayServer!.listen(0, "127.0.0.1", () => resolvePromise()));
+      const address = gatewayServer.address(); if (address && typeof address !== "string") gatewayUrl = `http://127.0.0.1:${address.port}`;
+    } catch { /* dev workspace without built services: gateway-less demo */ }
   }
   // With login pending there is no token to inject; the renderer shows the
   // login screen and the sidecar starts once a session is established.

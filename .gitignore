@@ -25,6 +25,12 @@ tmp/
 output/
 .playwright-cli/
 
+# Desktop installer output and the built sidecar binary: both are produced by
+# npm run build:sidecar / dist:win and must never be committed
+apps/desktop/release/
+apps/desktop/resources/codex.exe
+apps/desktop/resources/codex
+
 # Local handoff documents requested to remain outside normal tracking
 AGENTS.md
 PROGRESS.md
@@ -33,3 +39,7 @@ docs/
 
 # Scratch demo workspace (own node_modules/dist), keep untracked
 tool-calls-3-demo/
+
+AGENTS.md
+CLAUDE.md
+
