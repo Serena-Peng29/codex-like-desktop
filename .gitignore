@@ -43,3 +43,7 @@ tool-calls-3-demo/
 AGENTS.md
 CLAUDE.md
 
+# Scratch probe scripts and runtime ledger dumps: never commit
+scripts/tmp-*.mjs
+/tmp-ledger.json
+
