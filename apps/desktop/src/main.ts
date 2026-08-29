@@ -64,7 +64,32 @@ class SidecarManager {
     const sidecar = [configured, packaged, bundled, discovered].find((candidate) => candidate && existsSync(candidate));
     if (!sidecar) { this.status = "failed"; this.usingRealSidecar = false; return; }
     this.usingRealSidecar = true;
-    this.child = spawn(sidecar, ["app-server"], { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: process.env });
+    // Gateway passthrough (docs/gateway-auth.md P1-0): point the sidecar's model
+    // provider at our gateway through -c CLI overrides and hand the user token
+    // over via the env var named by env_key, so no credential is written to
+    // config.toml or auth.json. The provider keeps requires_openai_auth=false,
+    // which makes the env token the only auth source.
+    const gatewayBase = process.env.WAY2AGI_GATEWAY_URL?.trim();
+    const gatewayToken = process.env.WAY2AGI_GATEWAY_TOKEN?.trim();
+    const sidecarArgs = ["app-server"];
+    let sidecarEnv: NodeJS.ProcessEnv = process.env;
+    if (gatewayBase && gatewayToken && !gatewayBase.includes('"')) {
+      // Isolated CODEX_HOME: user plugins/marketplaces from ~/.codex stay out,
+      // and our -c overrides (SessionFlags layer) outrank any user config anyway.
+      const codexHome = join(app.getPath("userData"), "codex-home");
+      mkdirSync(codexHome, { recursive: true });
+      sidecarArgs.push(
+        "-c", 'model_provider="way2agi"',
+        "-c", 'model_providers.way2agi.name="Way2AGI"',
+        "-c", `model_providers.way2agi.base_url="${gatewayBase}"`,
+        "-c", 'model_providers.way2agi.env_key="WAY2AGI_TOKEN"',
+        "-c", "disable_response_storage=true"
+      );
+      const model = process.env.WAY2AGI_MODEL?.trim();
+      if (model && !model.includes('"')) sidecarArgs.push("-c", `model="${model}"`);
+      sidecarEnv = { ...process.env, CODEX_HOME: codexHome, WAY2AGI_TOKEN: gatewayToken };
+    }
+    this.child = spawn(sidecar, sidecarArgs, { stdio: ["pipe", "pipe", "pipe"], windowsHide: true, env: sidecarEnv });
     const lines = createInterface({ input: this.child.stdout });
     lines.on("line", (line) => { try {
       const message = JSON.parse(line) as { id?: number | string; method?: string; params?: Record<string, unknown>; result?: unknown; error?: { message?: string } };
