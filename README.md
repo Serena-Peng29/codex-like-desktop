@@ -2,10 +2,9 @@
 
 一个开源的 AI 编程桌面客户端（Windows / macOS）：内置 Codex App Server，连接本地项目完成对话、文件修改和命令审批；模型请求统一经过自建的 OpenAI 兼容网关，配合账号登录与「套餐额度 + 按 token 计费」的服务端账本。
 
-> 项目与 OpenAI 无官方关系；上游基于固定 commit 的 [Codex 开源代码](vendor/codex)，产品使用自有品牌。
+> 项目与 OpenAI 无官方关系；上游基于固定 commit 的 [openai/codex](https://github.com/openai/codex)（`25a6e31`）开源代码，产品使用自有品牌。
 
-<!-- TODO(截图)：把桌面截图放到 docs/images/desktop.png 后删除本行 -->
-![Codex Harness 桌面端](docs/images/desktop.png)
+![alt text](image.png)
 
 ## 功能特性
 
@@ -47,15 +46,16 @@ flowchart LR
 ### 准备
 
 - Node.js 18+（Windows / macOS 均可）
-- Rust 工具链（仅构建真实 sidecar 时需要；仓库根目录执行）
+- Rust 工具链（仅构建真实 sidecar 时需要）
 
 ```powershell
 git clone <本仓库>
 cd codex-like-desktop
 npm install
-npm run build:sidecar   # 构建固定上游 commit 的 codex 二进制到 apps/desktop/resources/
 npm run typecheck       # 编译全部 TS 包 + renderer
 ```
+
+> 上游 Codex 源码（`vendor/codex/`）体积大且不随本仓库分发：构建 sidecar 前需自行将其检出到固定 commit `25a6e31` 放到 `vendor/codex/codex-rs`，再执行 `npm run build:sidecar`（产物输出到 `apps/desktop/resources/`）。没有上游源码时仍可运行全部服务端与桌面 UI（见下方免后端模式）。
 
 ### 启动三个进程
 
@@ -131,12 +131,6 @@ npm run dist:win   # build:all + electron-builder 打 Windows 安装包
 4. 本地命令执行保留用户审批边界，不做远程执行或远程沙箱。
 5. 不提交任何真实密钥；不为了通过测试关闭审批、账单或签名校验。
 
-## 文档
-
-- [架构说明](docs/architecture.md)
-- [上游同步规则](docs/upstream-sync.md)
-- [Phase 0 验收记录](docs/phase-0.md)
-
 ## 许可
 
-尚未确定开源许可证；在添加 LICENSE 文件前，仓库内代码默认保留所有权利，请勿直接分发。
+[MIT](LICENSE)
