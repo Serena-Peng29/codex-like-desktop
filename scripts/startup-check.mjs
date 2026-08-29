@@ -6,6 +6,8 @@ const required = [
   "apps/desktop/dist/main.js",
   "apps/desktop/dist/preload.cjs",
   "apps/desktop/dist/renderer/index.html",
+  "packages/shared/dist/index.js",
+  "services/api/dist/server.js",
   "services/model-gateway/dist/server.js",
   "services/billing/dist/ledger.js",
   "scripts/mock-app-server.js"

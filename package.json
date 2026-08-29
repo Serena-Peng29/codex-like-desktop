@@ -1,10 +1,10 @@
 {
   "name": "codex-like-desktop",
   "private": true,
-  "workspaces": ["apps/desktop", "services/model-gateway", "services/billing", "packages/protocol"],
+  "workspaces": ["apps/desktop", "services/api", "services/model-gateway", "services/billing", "packages/protocol", "packages/shared"],
   "scripts": {
     "dev": "npm run build:all && electron apps/desktop/dist/main.js",
-    "build:all": "tsc -p packages/protocol/tsconfig.json && tsc -p services/billing/tsconfig.json && tsc -p services/model-gateway/tsconfig.json && tsc -p apps/desktop/tsconfig.json && npm run build --workspace @codex-like/desktop",
+    "build:all": "tsc -p packages/shared/tsconfig.json && tsc -p packages/protocol/tsconfig.json && tsc -p services/billing/tsconfig.json && tsc -p services/model-gateway/tsconfig.json && tsc -p services/api/tsconfig.json && tsc -p apps/desktop/tsconfig.json && npm run build --workspace @codex-like/desktop",
     "test": "vitest run",
     "typecheck": "npm run build:all",
     "build:sidecar": "powershell -ExecutionPolicy Bypass -File scripts/build-sidecar.ps1",

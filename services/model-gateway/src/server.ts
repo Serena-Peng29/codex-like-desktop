@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { createHmac, timingSafeEqual } from "node:crypto";
 import { Readable, Transform } from "node:stream";
 import { TestLedger } from "@codex-like/billing";
+import { verifyJwt } from "@codex-like/shared";
 
 // Two modes share this server:
 // - mock mode (no options/env): the Phase 0 echo stub the desktop embeds when
@@ -41,25 +41,8 @@ function envConfig(): GatewayConfig {
   };
 }
 
-// Minimal HS256 verification: pinned algorithm, constant-time signature
-// comparison, exp enforced. Rejects alg:none and any other algorithm before
-// touching the signature, so there is no algorithm-confusion surface.
-function verifyJwt(token: string, secret: string): { sub?: unknown; exp?: unknown } | null {
-  const parts = token.split(".");
-  if (parts.length !== 3) return null;
-  const [headerPart, payloadPart, signaturePart] = parts;
-  let header: { alg?: unknown }; let payload: { sub?: unknown; exp?: unknown };
-  try {
-    header = JSON.parse(Buffer.from(headerPart, "base64url").toString("utf8"));
-    payload = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8"));
-  } catch { return null; }
-  if (header.alg !== "HS256") return null;
-  if (typeof payload.exp !== "number" || payload.exp * 1000 <= Date.now()) return null;
-  const expected = createHmac("sha256", secret).update(`${headerPart}.${payloadPart}`).digest();
-  const actual = Buffer.from(signaturePart, "base64url");
-  if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) return null;
-  return payload;
-}
+// Token verification lives in @codex-like/shared so services/api (issuer) and
+// this gateway (verifier) cannot drift apart.
 
 // Scans a passing-through SSE byte stream for the completion event and keeps
 // the upstream usage. Passthrough bytes are never rewritten, so a UTF-8

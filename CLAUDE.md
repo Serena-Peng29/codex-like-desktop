@@ -91,6 +91,7 @@ npm run startup-check   # 构建产物、mock sidecar 握手和启动检查
 npm run protocol-smoke  # 若存在真实 sidecar，验证上游 initialize/initialized 协议
 npm run protocol-schema-check # 校验固定上游 schema 仍包含 Phase 0 所需方法
 node services/model-gateway/dist/server.js # 开发网关：设 GATEWAY_JWT_SECRET+GATEWAY_UPSTREAM_BASE_URL+GATEWAY_UPSTREAM_API_KEY 进网关模式（验 JWT、转发上游、按 usage 记账），否则 mock 模式；可用 GATEWAY_MODELS 定目录、PORT 改端口
+node services/api/dist/server.js # 开发认证服务：GATEWAY_JWT_SECRET 必须与网关一致（签发网关可验的 JWT）；AUTH_DEV_CODE 默认 888888（开发验证码，POST /auth/request-code 直接返回）；API_GATEWAY_BASE_URL/GATEWAY_MODELS 决定 /client/bootstrap 返回；PORT 默认 4320
 node scripts/dev-issue-token.mjs # 为开发网关签发用户 JWT：GATEWAY_JWT_SECRET 必填，TOKEN_USER/TOKEN_TTL_HOURS 可选；生产令牌由 services/api 签发
 npm run build:sidecar   # 需要 Rust/cargo；构建固定上游 25a6e31 的 codex 二进制
 npm run dev             # 启动 Electron 技术验证客户端
