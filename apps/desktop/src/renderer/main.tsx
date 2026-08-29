@@ -231,6 +231,82 @@ type ProjectGroup = { key: string; path: string | null; name: string; entries: H
 type ViewPrefs = { grouping: "workspace" | "flat"; sort: "manual" | "recent" };
 
 const fallbackModelOptions = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.2"];
+
+function formatCredits(credits: number) {
+  if (credits >= 100_000_000) return `${Math.round(credits / 100_000_000)}亿`;
+  if (credits >= 10_000) return `${Math.round(credits / 10_000) / 10}万`.replace(/\.0万$/, "万");
+  return String(credits);
+}
+
+type RechargeOrderView = { id: string; credits: number; amountYuan: number; channel: string; status: "pending" | "paid"; codeUrl: string; transactionId: string | null };
+
+// Recharge dialog (P1-4): pick a credit package and channel, then watch the
+// order until the payment callback settles it server-side. The QR area shows
+// the development code; real WeChat/Alipay codeUrls render in the same slot.
+function RechargeModal({ onClose, onSettled }: { onClose: () => void; onSettled: () => void }) {
+  const [credits, setCredits] = useState(1_000_000);
+  const [channel, setChannel] = useState<"wechat" | "alipay">("wechat");
+  const [order, setOrder] = useState<RechargeOrderView | null>(null);
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (!order || order.status !== "pending") return;
+    const timer = setInterval(() => {
+      void window.desktop.getRechargeOrder(order.id).then((next) => {
+        setOrder(next);
+        if (next.status === "paid") onSettled();
+      }).catch(() => undefined);
+    }, 2_000);
+    return () => clearInterval(timer);
+  }, [order, onSettled]);
+  async function createOrder() {
+    if (busy) return;
+    setBusy(true); setNotice("");
+    try { setOrder(await window.desktop.createRechargeOrder(credits, channel)); }
+    catch (error) { setNotice(`创建订单失败：${error instanceof Error ? error.message : String(error)}`); }
+    finally { setBusy(false); }
+  }
+  async function mockPay() {
+    if (!order || busy) return;
+    setBusy(true); setNotice("");
+    try {
+      const result = await window.desktop.mockPayOrder(order.id);
+      setOrder(result.order); onSettled();
+    } catch (error) { setNotice(`支付失败：${error instanceof Error ? error.message : String(error)}`); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="recharge-overlay" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div className="recharge-card">
+        <div className="recharge-head"><strong>充值</strong><button className="recharge-close" onClick={onClose} aria-label="关闭">×</button></div>
+        {!order ? <>
+          <div className="recharge-label">选择额度</div>
+          <div className="recharge-presets">
+            {[[100_000, "10万"], [1_000_000, "100万"], [5_000_000, "500万"]].map(([value, label]) => (
+              <button key={value} className={`recharge-preset ${credits === value ? "is-active" : ""}`} onClick={() => setCredits(value as number)}>{label as string}</button>
+            ))}
+          </div>
+          <div className="recharge-label">支付方式</div>
+          <div className="recharge-presets">
+            <button className={`recharge-preset ${channel === "wechat" ? "is-active" : ""}`} onClick={() => setChannel("wechat")}>微信支付</button>
+            <button className={`recharge-preset ${channel === "alipay" ? "is-active" : ""}`} onClick={() => setChannel("alipay")}>支付宝</button>
+          </div>
+          <button className="login-primary" onClick={() => void createOrder()} disabled={busy}>{busy ? "创建中…" : "创建订单"}</button>
+        </> : order.status === "pending" ? <>
+          <div className="recharge-amount">¥{order.amountYuan.toFixed(2)} · {formatCredits(order.credits)} 额度</div>
+          <div className="recharge-qr" title={order.codeUrl}>二维码（开发通道）</div>
+          <div className="recharge-code">{order.codeUrl}</div>
+          <div className="login-notice">支付完成后自动到账，也可用开发模拟通道立即入账。</div>
+          <button className="login-secondary recharge-mock" onClick={() => void mockPay()} disabled={busy}>模拟支付成功（开发）</button>
+        </> : <>
+          <div className="recharge-done">充值成功 · {formatCredits(order.credits)} 额度已到账</div>
+          <button className="login-primary" onClick={onClose}>完成</button>
+        </>}
+        {notice && <div className="login-notice">{notice}</div>}
+      </div>
+    </div>
+  );
+}
 const intensityOptions = ["低", "中", "高"];
 const viewPrefsStorageKey = "codex-harness-view-prefs";
 
@@ -910,6 +986,8 @@ function App() {
   const [goalText, setGoalText] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [billing, setBilling] = useState<{ signedIn: boolean; totalCredits: number | null } | null>(null);
+  const [rechargeOpen, setRechargeOpen] = useState(false);
   // Model catalog comes from the backend (login bootstrap) when available;
   // the static list is only the offline fallback.
   const modelOptions = state?.models?.length ? state.models : fallbackModelOptions;
@@ -1051,8 +1129,14 @@ function App() {
     if (goalInputMode) composerInputRef.current?.focus();
   }, [goalInputMode]);
 
+  function refreshBilling() {
+    if (!window.desktop?.billingState) return;
+    void window.desktop.billingState().then(setBilling).catch(() => undefined);
+  }
+
   useEffect(() => {
     if (!window.desktop) return;
+    refreshBilling();
     void window.desktop.state().then(async (nextState) => {
       setState(nextState);
       activeThreadIdRef.current = nextState.activeThreadId;
@@ -1848,7 +1932,8 @@ function App() {
 
   return (
     <div className="app-window">
-      {state?.auth?.required && !state.auth.user && <LoginOverlay onLoggedIn={() => { void window.desktop.state().then(setState); }} />}
+      {state?.auth?.required && !state.auth.user && <LoginOverlay onLoggedIn={() => { void window.desktop.state().then(setState); refreshBilling(); }} />}
+      {rechargeOpen && <RechargeModal onClose={() => setRechargeOpen(false)} onSettled={refreshBilling} />}
       <div className="global-menubar">
         <div className="window-controls"><button className="menu-icon" title="切换侧栏" aria-label="切换侧栏">◧</button><button className="menu-icon" title="后退" aria-label="后退">←</button><button className="menu-icon muted-icon" title="前进" aria-label="前进">→</button></div>
         <nav className="app-menus" aria-label="应用菜单"><button>文件</button><button>编辑</button><button>视图</button><button>帮助</button></nav>
@@ -1918,6 +2003,12 @@ function App() {
         </div>
 
         <div className="sidebar-footer">
+          {state?.auth?.user && (
+            <button className="balance-chip" title="余额与充值" onClick={() => { refreshBilling(); setRechargeOpen(true); }}>
+              <span className="balance-value">{billing?.signedIn && billing.totalCredits != null ? `${formatCredits(billing.totalCredits)} 额度` : "余额…"}</span>
+              <span className="balance-recharge">充值</span>
+            </button>
+          )}
           <button className="settings-button"><Settings size={17} /> 设置</button>
         </div>
       </aside>

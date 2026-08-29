@@ -500,6 +500,26 @@ app.whenReady().then(async () => {
     authRequired = true;
     await sidecar.stop();
   });
+  ipcMain.handle("billing:state", async () => {
+    if (!authSession) return { signedIn: false, totalCredits: null };
+    try {
+      const balance = await apiRequest("GET", "/billing/balance", undefined, authSession.accessToken) as Record<string, unknown>;
+      return { signedIn: true, totalCredits: Number(balance.totalCredits ?? 0) };
+    } catch { return { signedIn: true, totalCredits: null }; }
+  });
+  ipcMain.handle("billing:create-order", async (_event, credits: unknown, channel: unknown) => {
+    if (!authSession) throw new Error("not_signed_in");
+    if (!Number.isInteger(credits) || (channel !== "wechat" && channel !== "alipay")) throw new Error("invalid_order_input");
+    return apiRequest("POST", "/billing/orders", { credits, channel }, authSession.accessToken);
+  });
+  ipcMain.handle("billing:get-order", async (_event, orderId: unknown) => {
+    if (!authSession || typeof orderId !== "string" || !orderId) throw new Error("invalid_order_query");
+    return apiRequest("GET", `/billing/orders/${encodeURIComponent(orderId)}`, undefined, authSession.accessToken);
+  });
+  ipcMain.handle("billing:mock-pay", async (_event, orderId: unknown) => {
+    if (!authSession || typeof orderId !== "string" || !orderId) throw new Error("invalid_order_query");
+    return apiRequest("POST", `/billing/orders/${encodeURIComponent(orderId)}/mock-pay`, {}, authSession.accessToken);
+  });
   ipcMain.handle("app:state", async () => {
     const history = await listConversationHistory();
     return { projectPath, activeThreadId, activeTurnThreadId: activeTurn?.threadId ?? null, activeTurnId: activeTurn?.turnId ?? null, unassignedThreadIds: [...unassignedThreadIds], threadProjectPaths: Object.fromEntries(threadProjectPaths), threadDisplayNames: Object.fromEntries(threadDisplayNames), pinnedThreadIds: [...pinnedThreadIds], projectMeta: Object.fromEntries(projectMeta), pinnedProjects: [...pinnedProjects], removedProjects: [...removedProjects], history, sidecar: sidecar.status, gateway: gatewayUrl, gatewayMode: gatewayIsRemote ? "remote" : "local", auth: { required: authRequired, user: authSession?.user ?? null }, models: authSession?.models ?? [] };

@@ -29,6 +29,10 @@ declare global {
       requestCode(account: string): Promise<{ account: string; kind: string; devCode?: string }>;
       login(account: string, code: string): Promise<{ user: { id: string; account: string; kind: string }; gatewayBaseUrl: string | null; models: string[] }>;
       logout(): Promise<void>;
+      billingState(): Promise<{ signedIn: boolean; totalCredits: number | null }>;
+      createRechargeOrder(credits: number, channel: "wechat" | "alipay"): Promise<{ id: string; credits: number; amountYuan: number; channel: string; status: "pending" | "paid"; codeUrl: string; transactionId: string | null; createdAtMs: number; expiresAtMs: number }>;
+      getRechargeOrder(orderId: string): Promise<{ id: string; credits: number; amountYuan: number; channel: string; status: "pending" | "paid"; codeUrl: string; transactionId: string | null; createdAtMs: number; expiresAtMs: number }>;
+      mockPayOrder(orderId: string): Promise<{ ok: boolean; replayed: boolean; order: { id: string; credits: number; amountYuan: number; channel: string; status: "pending" | "paid"; codeUrl: string; transactionId: string | null } }>;
       chooseProject(): Promise<string | null>;
       setProject(path: string): Promise<string>;
       clearProject(): Promise<void>;

@@ -175,4 +175,26 @@ describe("gateway mode (jwt + upstream forwarding)", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("credits internal top-ups once per idempotency key under the shared secret", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gw-topup-"));
+    const ledgerPath = join(dir, "ledger.json");
+    try {
+      const base = await startGateway({ ledgerPath, internalSecret: "internal-secret" });
+      const topup = (key: string, secret: string) => fetch(`${base}/internal/topup`, { method: "POST", headers: { "content-type": "application/json", "x-internal-secret": secret }, body: JSON.stringify({ userId: "grace", credits: 1000, source: "wechat", idempotencyKey: key }) });
+      const anonymous = await fetch(`${base}/internal/topup`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ userId: "grace", credits: 1000, source: "wechat", idempotencyKey: "k0" }) });
+      expect(anonymous.status).toBe(401);
+      const first = await topup("order-1", "internal-secret");
+      expect(first.status).toBe(200);
+      expect(await first.json()).toMatchObject({ ok: true, replayed: false });
+      const replay = await topup("order-1", "internal-secret");
+      expect(await replay.json()).toMatchObject({ ok: true, replayed: true });
+      const reloaded = new PersistentLedger(ledgerPath);
+      expect(reloaded.get("grace").overageCredits).toBe(1000);
+      const balance = await fetch(`${base}/internal/accounts/grace`, { headers: { "x-internal-secret": "internal-secret" } });
+      expect(await balance.json()).toMatchObject({ id: "grace", overageCredits: 1000 });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

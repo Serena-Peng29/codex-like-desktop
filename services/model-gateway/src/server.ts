@@ -23,12 +23,14 @@ type LedgerLike = {
   charge(id: string, credits: number, meta?: { inputTokens?: number; outputTokens?: number; source?: string }): { ok: boolean } & Record<string, unknown>;
   createTestAccount?(id?: string, credits?: number): unknown;
   addOverage?(id: string, credits: number): unknown;
+  topup?(id: string, credits: number, source: string, idempotencyKey: string): { entry: { id: string }; replayed: boolean };
 };
 
 export type GatewayOptions = {
   jwtSecret?: string;
   upstreamBaseUrl?: string;
   upstreamApiKey?: string;
+  internalSecret?: string;
   models?: string[];
   ledger?: LedgerLike;
   ledgerPath?: string;
@@ -45,6 +47,7 @@ function envConfig(): GatewayConfig {
     jwtSecret: process.env.GATEWAY_JWT_SECRET,
     upstreamBaseUrl: process.env.GATEWAY_UPSTREAM_BASE_URL?.replace(/\/+$/, ""),
     upstreamApiKey: process.env.GATEWAY_UPSTREAM_API_KEY,
+    internalSecret: process.env.GATEWAY_INTERNAL_SECRET,
     models: models?.length ? models : undefined,
     ledgerPath: process.env.GATEWAY_LEDGER_PATH,
     devCredits: Number(process.env.GATEWAY_DEV_CREDITS ?? 200_000),
@@ -91,6 +94,15 @@ class SseUsageScanner extends Transform {
 function json(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
+}
+
+async function readBody(req: IncomingMessage, limit: number): Promise<string> {
+  let raw = "";
+  for await (const chunk of req) {
+    raw += chunk;
+    if (raw.length > limit) throw new Error("request_too_large");
+  }
+  return raw;
 }
 
 function tokens(text: string) { return Math.max(1, Math.ceil(text.length / 4)); }
@@ -202,7 +214,39 @@ export function createGatewayServer(options: GatewayOptions = {}) {
   }
 
   return createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    try {
     if (req.method === "GET" && req.url === "/health") return json(res, 200, { ok: true, service: "model-gateway", mode: gatewayMode ? "gateway" : "mock" });
+
+    // Internal surface for services/api (P1-4): the gateway process is the
+    // single writer of the ledger, so payment crediting and balance reads go
+    // through here under a shared secret — never through the user JWT, and
+    // therefore ahead of the per-user gateway authentication below.
+    if (config.internalSecret) {
+      const internalAuthorized = req.headers["x-internal-secret"] === config.internalSecret;
+      if (req.method === "POST" && req.url === "/internal/topup") {
+        if (!internalAuthorized) return json(res, 401, { error: "invalid_internal_secret" });
+        let body: { userId?: unknown; credits?: unknown; source?: unknown; idempotencyKey?: unknown };
+        try { body = JSON.parse(await readBody(req, 64_000)) as typeof body; } catch { return json(res, 400, { error: "invalid_json" }); }
+        const userId = typeof body.userId === "string" ? body.userId : "";
+        const credits = Number(body.credits);
+        const source = typeof body.source === "string" ? body.source : "";
+        const idempotencyKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey : "";
+        if (!userId || !Number.isFinite(credits) || credits <= 0 || !source || !idempotencyKey) return json(res, 400, { error: "invalid_topup_request" });
+        provision(userId);
+        if (typeof ledger.topup === "function") {
+          const { entry, replayed } = ledger.topup(userId, credits, source, idempotencyKey);
+          return json(res, 200, { ok: true, replayed, entryId: entry.id, account: ledger.get(userId) });
+        }
+        // Transient ledger has no idempotent top-up; caller-side dedup only.
+        ledger.addOverage?.(userId, credits);
+        return json(res, 200, { ok: true, replayed: false, entryId: null, account: ledger.get(userId) });
+      }
+      if (req.method === "GET" && req.url?.startsWith("/internal/accounts/")) {
+        if (!internalAuthorized) return json(res, 401, { error: "invalid_internal_secret" });
+        const id = req.url.split("/").pop() ?? "";
+        try { return json(res, 200, ledger.get(id)); } catch { return json(res, 404, { error: "account_not_found" }); }
+      }
+    }
 
     if (gatewayMode) {
       const userId = authorize(req);
@@ -239,10 +283,10 @@ export function createGatewayServer(options: GatewayOptions = {}) {
       }
       try { return json(res, 200, ledger.get(id)); } catch { return json(res, 404, { error: "account_not_found" }); }
     }
+
     if (req.method !== "POST" || req.url !== "/v1/responses") return json(res, 404, { error: "not_found" });
     // Mock mode: Phase 0 echo stub.
-    req.setTimeout(15_000);
-    let raw = "";
+    req.setTimeout(15_000);    let raw = "";
     for await (const chunk of req) { raw += chunk; if (raw.length > 1_000_000) return json(res, 413, { error: "request_too_large" }); }
     let body: ChatRequest;
     try { body = JSON.parse(raw) as ChatRequest; } catch { return json(res, 400, { error: "invalid_json" }); }
@@ -253,6 +297,9 @@ export function createGatewayServer(options: GatewayOptions = {}) {
     const inputTokens = tokens(input);
     const outputTokens = tokens(output);
     const totalTokens = inputTokens + outputTokens;
+    // A file-backed ledger has no seeded test-user; provision before charging
+    // so the mock path cannot throw on a missing account.
+    provision(userId);
     const charge = ledger.charge(userId, totalTokens);
     if (!charge.ok) return json(res, 402, { error: "insufficient_credits", account: ledger.get(userId) });
     if (body.model && body.model !== "gpt-4o-mini") return json(res, 400, { error: "model_not_available" });
@@ -262,10 +309,19 @@ export function createGatewayServer(options: GatewayOptions = {}) {
     res.write(`data: ${JSON.stringify({ type: "response.completed", usage: { inputTokens, outputTokens, totalTokens, ...charge } })}\n\n`);
     res.write("data: [DONE]\n\n");
     res.end();
+    } catch (error) {
+      // One broken request must never take the process — and every mounted
+      // ledger write — down with it.
+      console.warn(`[model-gateway] request failed: ${error instanceof Error ? error.message : String(error)}`);
+      try { json(res, 500, { error: "internal_error" }); } catch { /* response already started */ }
+    }
   });
 }
 
 if (process.argv[1]?.endsWith("server.js")) {
   const port = Number(process.env.PORT ?? 4310);
+  if (process.env.GATEWAY_JWT_SECRET && !(process.env.GATEWAY_UPSTREAM_BASE_URL && process.env.GATEWAY_UPSTREAM_API_KEY)) {
+    console.warn("[model-gateway] GATEWAY_JWT_SECRET is set but GATEWAY_UPSTREAM_BASE_URL/GATEWAY_UPSTREAM_API_KEY are not — falling back to the mock echo instead of gateway mode");
+  }
   createGatewayServer().listen(port, "127.0.0.1", () => console.log(`model-gateway listening on ${port} (${process.env.GATEWAY_JWT_SECRET ? "gateway" : "mock"} mode)`));
 }
