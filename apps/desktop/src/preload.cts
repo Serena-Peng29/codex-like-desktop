@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld("desktop", {
     close: () => ipcRenderer.invoke("window:close")
   },
   state: () => ipcRenderer.invoke("app:state"),
+  requestCode: (account: string) => ipcRenderer.invoke("auth:request-code", account),
+  login: (account: string, code: string) => ipcRenderer.invoke("auth:login", account, code),
+  logout: () => ipcRenderer.invoke("auth:logout"),
   chooseProject: () => ipcRenderer.invoke("project:choose"),
   setProject: (path: string) => ipcRenderer.invoke("project:set", path),
   clearProject: () => ipcRenderer.invoke("project:clear"),

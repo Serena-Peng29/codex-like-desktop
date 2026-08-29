@@ -94,7 +94,7 @@ node services/model-gateway/dist/server.js # 开发网关：设 GATEWAY_JWT_SECR
 node services/api/dist/server.js # 开发认证服务：GATEWAY_JWT_SECRET 必须与网关一致（签发网关可验的 JWT）；AUTH_DEV_CODE 默认 888888（开发验证码，POST /auth/request-code 直接返回）；API_GATEWAY_BASE_URL/GATEWAY_MODELS 决定 /client/bootstrap 返回；PORT 默认 4320
 node scripts/dev-issue-token.mjs # 为开发网关签发用户 JWT：GATEWAY_JWT_SECRET 必填，TOKEN_USER/TOKEN_TTL_HOURS 可选；生产令牌由 services/api 签发
 npm run build:sidecar   # 需要 Rust/cargo；构建固定上游 25a6e31 的 codex 二进制
-npm run dev             # 启动 Electron 技术验证客户端
+npm run dev             # 启动 Electron 技术验证客户端；设 API_BASE_URL（如 http://127.0.0.1:4320）启用登录页（配合 services/api），WAY2AGI_GATEWAY_URL/WAY2AGI_GATEWAY_TOKEN 环境变量优先于登录会话
 ```
 
 `scripts/startup-check.mjs` 使用 `scripts/mock-app-server.js` 做无真实二进制的启动验证；`npm run dev` 需要 `CODEX_SIDECAR_PATH`、开发资源目录或已打包的真实 sidecar。发布包必须先运行 `npm run build:sidecar` 并通过资源目录提供真实 sidecar，不得回退到全局 CLI。

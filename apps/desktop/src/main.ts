@@ -1,8 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -69,8 +69,8 @@ class SidecarManager {
     // over via the env var named by env_key, so no credential is written to
     // config.toml or auth.json. The provider keeps requires_openai_auth=false,
     // which makes the env token the only auth source.
-    const gatewayBase = process.env.WAY2AGI_GATEWAY_URL?.trim();
-    const gatewayToken = process.env.WAY2AGI_GATEWAY_TOKEN?.trim();
+    const gatewayBase = process.env.WAY2AGI_GATEWAY_URL?.trim() || authSession?.gatewayBaseUrl?.trim() || "";
+    const gatewayToken = process.env.WAY2AGI_GATEWAY_TOKEN?.trim() || authSession?.accessToken || "";
     const sidecarArgs = ["app-server"];
     let sidecarEnv: NodeJS.ProcessEnv = process.env;
     if (gatewayBase && gatewayToken && !gatewayBase.includes('"')) {
@@ -124,6 +124,67 @@ let gatewayUrl = "";
 let gatewayIsRemote = false;
 let gatewayServer: import("node:http").Server | null = null;
 const gatewayModel = process.env.MODEL ?? "gpt-4o-mini";
+
+// Login state (docs/gateway-auth.md P1-2). The desktop talks to services/api,
+// keeps only the refresh token — encrypted via safeStorage, never plaintext —
+// and hands the short-lived access token to the sidecar through the env var
+// named by the provider's env_key. Provider credentials never reach this
+// process.
+type AuthUser = { id: string; account: string; kind: string };
+type AuthSession = { accessToken: string; user: AuthUser; gatewayBaseUrl?: string; models?: string[] };
+let authSession: AuthSession | null = null;
+// True when services/api is in play (env-configured or a stored session
+// exists) but no valid session is held: the renderer must show the login
+// screen before any turn can run.
+let authRequired = false;
+const apiBaseUrl = (process.env.API_BASE_URL ?? "http://127.0.0.1:4320").replace(/\/+$/, "");
+const authSessionFile = () => join(app.getPath("userData"), "auth-session.enc");
+
+async function apiRequest(method: "GET" | "POST", path: string, body?: Record<string, unknown>, accessToken?: string): Promise<Record<string, unknown>> {
+  const response = await fetch(`${apiBaseUrl}${path}`, {
+    method,
+    headers: { ...(body ? { "content-type": "application/json" } : {}), ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}) },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const parsed = await response.json().catch(() => ({})) as Record<string, unknown>;
+  if (!response.ok) throw new Error(typeof parsed.error === "string" ? parsed.error : `api_error_${response.status}`);
+  return parsed;
+}
+
+function saveRefreshToken(token: string) {
+  if (!safeStorage.isEncryptionAvailable()) throw new Error("secure_storage_unavailable");
+  writeFileSync(authSessionFile(), safeStorage.encryptString(token));
+}
+function loadRefreshToken(): string | null {
+  try { return safeStorage.decryptString(readFileSync(authSessionFile())); } catch { return null; }
+}
+function clearRefreshToken() { try { rmSync(authSessionFile()); } catch { /* already gone */ } }
+
+async function establishSession(accessToken: string, refreshToken: string, user: AuthUser): Promise<AuthSession> {
+  const bootstrap = await apiRequest("GET", "/client/bootstrap", undefined, accessToken).catch(() => null);
+  const session: AuthSession = {
+    accessToken,
+    user,
+    ...(typeof bootstrap?.gatewayBaseUrl === "string" ? { gatewayBaseUrl: bootstrap.gatewayBaseUrl } : {}),
+    ...(Array.isArray(bootstrap?.models) ? { models: bootstrap.models.filter((id): id is string => typeof id === "string") } : {})
+  };
+  saveRefreshToken(refreshToken);
+  return session;
+}
+
+async function tryRestoreSession(): Promise<boolean> {
+  const stored = loadRefreshToken();
+  if (!stored) return false;
+  try {
+    const refreshed = await apiRequest("POST", "/auth/refresh", { refreshToken: stored }) as { accessToken?: string; refreshToken?: string; user?: AuthUser };
+    if (typeof refreshed.accessToken !== "string" || typeof refreshed.refreshToken !== "string" || !refreshed.user) throw new Error("invalid_refresh_response");
+    authSession = await establishSession(refreshed.accessToken, refreshed.refreshToken, refreshed.user);
+    return true;
+  } catch {
+    clearRefreshToken();
+    return false;
+  }
+}
 const approvals = new Map<string, { command: string; cwd: string }>();
 const zhCollator = new Intl.Collator(["zh", "en"], { sensitivity: "base", numeric: true });
 const allowedCommands = new Set(["node", "npm", "pnpm", "git", "cargo", "python", "python3", "echo"]);
@@ -362,8 +423,25 @@ async function interruptActiveTurn() {
   return true;
 }
 
+// (Re)start the sidecar with the currently effective gateway config — env
+// overrides win, an established login session fills in base URL and token —
+// and resubscribe the persisted thread so history keeps flowing after a login
+// or logout switches providers.
+async function startSidecar() {
+  await sidecar.stop();
+  await sidecar.start();
+  if (activeThreadId) {
+    await sidecar.request("thread/resume", { threadId: activeThreadId, ...(projectPath ? { cwd: projectPath } : {}) }).catch(() => { activeThreadId = null; persistClientState(); });
+  }
+}
+
 app.whenReady().then(async () => {
   loadClientState();
+  // Login is in play only when services/api is explicitly configured or a
+  // stored session exists; without either, the Phase 0 demo flow is unchanged.
+  let apiConfigured = false;
+  try { apiConfigured = Boolean(process.env.API_BASE_URL) || Boolean(loadRefreshToken()); } catch { apiConfigured = false; }
+  if (apiConfigured) authRequired = !(await tryRestoreSession());
   const configuredGateway = process.env.MODEL_GATEWAY_BASE_URL?.replace(/\/+$/, "");
   if (configuredGateway) { gatewayUrl = configuredGateway; gatewayIsRemote = true; }
   else {
@@ -372,10 +450,9 @@ app.whenReady().then(async () => {
     await new Promise<void>((resolvePromise) => gatewayServer!.listen(0, "127.0.0.1", () => resolvePromise()));
     const address = gatewayServer.address(); if (address && typeof address !== "string") gatewayUrl = `http://127.0.0.1:${address.port}`;
   }
-  await sidecar.start();
-  if (activeThreadId) {
-    await sidecar.request("thread/resume", { threadId: activeThreadId, ...(projectPath ? { cwd: projectPath } : {}) }).catch(() => { activeThreadId = null; persistClientState(); });
-  }
+  // With login pending there is no token to inject; the renderer shows the
+  // login screen and the sidecar starts once a session is established.
+  if (!apiConfigured || authSession) await startSidecar();
   sidecar.setRequestHandler((request) => {
     const payload = { requestId: request.id, method: request.method, params: request.params ?? {} };
     // Every server-initiated request that can only proceed with a user answer
@@ -404,9 +481,28 @@ app.whenReady().then(async () => {
   ipcMain.handle("window:minimize", () => BrowserWindow.getFocusedWindow()?.minimize());
   ipcMain.handle("window:toggle-maximize", () => { const target = BrowserWindow.getFocusedWindow(); if (!target) return false; if (target.isMaximized()) target.unmaximize(); else target.maximize(); return target.isMaximized(); });
   ipcMain.handle("window:close", () => BrowserWindow.getFocusedWindow()?.close());
+  ipcMain.handle("auth:request-code", async (_event, account: unknown) => {
+    if (typeof account !== "string" || !account.trim()) throw new Error("invalid_account");
+    return apiRequest("POST", "/auth/request-code", { account: account.trim() });
+  });
+  ipcMain.handle("auth:login", async (_event, account: unknown, code: unknown) => {
+    if (typeof account !== "string" || typeof code !== "string" || !account.trim() || !code.trim()) throw new Error("invalid_login_input");
+    const result = await apiRequest("POST", "/auth/login", { account: account.trim(), code: code.trim() }) as { accessToken?: string; refreshToken?: string; user?: AuthUser };
+    if (typeof result.accessToken !== "string" || typeof result.refreshToken !== "string" || !result.user) throw new Error("invalid_login_response");
+    authSession = await establishSession(result.accessToken, result.refreshToken, result.user);
+    authRequired = false;
+    await startSidecar();
+    return { user: authSession.user, gatewayBaseUrl: authSession.gatewayBaseUrl ?? null, models: authSession.models ?? [] };
+  });
+  ipcMain.handle("auth:logout", async () => {
+    clearRefreshToken();
+    authSession = null;
+    authRequired = true;
+    await sidecar.stop();
+  });
   ipcMain.handle("app:state", async () => {
     const history = await listConversationHistory();
-    return { projectPath, activeThreadId, activeTurnThreadId: activeTurn?.threadId ?? null, activeTurnId: activeTurn?.turnId ?? null, unassignedThreadIds: [...unassignedThreadIds], threadProjectPaths: Object.fromEntries(threadProjectPaths), threadDisplayNames: Object.fromEntries(threadDisplayNames), pinnedThreadIds: [...pinnedThreadIds], projectMeta: Object.fromEntries(projectMeta), pinnedProjects: [...pinnedProjects], removedProjects: [...removedProjects], history, sidecar: sidecar.status, gateway: gatewayUrl, gatewayMode: gatewayIsRemote ? "remote" : "local" };
+    return { projectPath, activeThreadId, activeTurnThreadId: activeTurn?.threadId ?? null, activeTurnId: activeTurn?.turnId ?? null, unassignedThreadIds: [...unassignedThreadIds], threadProjectPaths: Object.fromEntries(threadProjectPaths), threadDisplayNames: Object.fromEntries(threadDisplayNames), pinnedThreadIds: [...pinnedThreadIds], projectMeta: Object.fromEntries(projectMeta), pinnedProjects: [...pinnedProjects], removedProjects: [...removedProjects], history, sidecar: sidecar.status, gateway: gatewayUrl, gatewayMode: gatewayIsRemote ? "remote" : "local", auth: { required: authRequired, user: authSession?.user ?? null }, models: authSession?.models ?? [] };
   });
   // Re-adding a previously removed project must lift the removal marker, or the
   // sidebar would keep hiding the group and the next launch would drop it again;

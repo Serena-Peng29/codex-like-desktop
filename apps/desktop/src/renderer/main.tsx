@@ -230,7 +230,7 @@ type ChatMessage = { id: string; role: "user" | "assistant"; content: string; im
 type ProjectGroup = { key: string; path: string | null; name: string; entries: HistoryEntry[]; isCurrent: boolean };
 type ViewPrefs = { grouping: "workspace" | "flat"; sort: "manual" | "recent" };
 
-const modelOptions = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.2"];
+const fallbackModelOptions = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.2"];
 const intensityOptions = ["低", "中", "高"];
 const viewPrefsStorageKey = "codex-harness-view-prefs";
 
@@ -823,6 +823,48 @@ function AssistantParts({ message }: { message: ChatMessage }) {
   </>;
 }
 
+// Full-screen login gate: shown when services/api is in play and no session
+// is held. Everything else in the app stays behind it; a successful login
+// restarts the sidecar with the gateway provider injected by the main process.
+function LoginOverlay({ onLoggedIn }: { onLoggedIn: () => void }) {
+  const [account, setAccount] = useState("");
+  const [code, setCode] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function requestCode() {
+    if (!account.trim() || busy) return;
+    setBusy(true); setNotice("");
+    try {
+      const result = await window.desktop.requestCode(account.trim());
+      setNotice(typeof result.devCode === "string" ? `开发验证码：${result.devCode}` : "验证码已发送");
+    } catch (error) { setNotice(`获取验证码失败：${error instanceof Error ? error.message : String(error)}`); }
+    finally { setBusy(false); }
+  }
+  async function login() {
+    if (!account.trim() || !code.trim() || busy) return;
+    setBusy(true); setNotice("");
+    try {
+      await window.desktop.login(account.trim(), code.trim());
+      onLoggedIn();
+    } catch (error) { setNotice(`登录失败：${error instanceof Error ? error.message : String(error)}`); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="login-overlay">
+      <div className="login-card">
+        <div className="login-brand"><strong>Way2AGI Code</strong><span>登录后开始使用</span></div>
+        <input className="login-input" placeholder="手机号或邮箱" value={account} autoComplete="username" onChange={(event) => setAccount(event.target.value)} />
+        <div className="login-row">
+          <input className="login-input" placeholder="验证码" value={code} autoComplete="one-time-code" onChange={(event) => setCode(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void login(); }} />
+          <button className="login-secondary" onClick={() => void requestCode()} disabled={busy}>获取验证码</button>
+        </div>
+        <button className="login-primary" onClick={() => void login()} disabled={busy}>{busy ? "登录中…" : "登录"}</button>
+        {notice && <div className="login-notice">{notice}</div>}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [state, setState] = useState<{
     projectPath: string | null;
@@ -840,6 +882,8 @@ function App() {
     sidecar: string;
     gateway: string;
     gatewayMode: "remote" | "local";
+    auth?: { required: boolean; user: { id: string; account: string; kind: string } | null };
+    models?: string[];
   }>();
   const [expandedProjects, setExpandedProjects] = useState<Record<string, boolean>>({});
   const [expandedSessionLists, setExpandedSessionLists] = useState<Record<string, boolean>>({});
@@ -866,6 +910,9 @@ function App() {
   const [goalText, setGoalText] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState<number | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Model catalog comes from the backend (login bootstrap) when available;
+  // the static list is only the offline fallback.
+  const modelOptions = state?.models?.length ? state.models : fallbackModelOptions;
   const [recentPrompts, setRecentPrompts] = useState<string[]>([
     "检查这个项目的结构并给出改进建议",
     "为这个项目补充一份 README",
@@ -1801,6 +1848,7 @@ function App() {
 
   return (
     <div className="app-window">
+      {state?.auth?.required && !state.auth.user && <LoginOverlay onLoggedIn={() => { void window.desktop.state().then(setState); }} />}
       <div className="global-menubar">
         <div className="window-controls"><button className="menu-icon" title="切换侧栏" aria-label="切换侧栏">◧</button><button className="menu-icon" title="后退" aria-label="后退">←</button><button className="menu-icon muted-icon" title="前进" aria-label="前进">→</button></div>
         <nav className="app-menus" aria-label="应用菜单"><button>文件</button><button>编辑</button><button>视图</button><button>帮助</button></nav>

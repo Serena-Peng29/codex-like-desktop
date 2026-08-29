@@ -23,7 +23,12 @@ declare global {
         sidecar: string;
         gateway: string;
         gatewayMode: "remote" | "local";
+        auth?: { required: boolean; user: { id: string; account: string; kind: string } | null };
+        models?: string[];
       }>;
+      requestCode(account: string): Promise<{ account: string; kind: string; devCode?: string }>;
+      login(account: string, code: string): Promise<{ user: { id: string; account: string; kind: string }; gatewayBaseUrl: string | null; models: string[] }>;
+      logout(): Promise<void>;
       chooseProject(): Promise<string | null>;
       setProject(path: string): Promise<string>;
       clearProject(): Promise<void>;
