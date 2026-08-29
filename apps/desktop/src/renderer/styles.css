@@ -383,10 +383,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .empty-state { padding: 3rem 1rem; color: var(--quiet); text-align: center; }
 .empty-state p { margin: .8rem 0 1rem; font-size: .76rem; line-height: 1.6; }
 .placeholder-icon { display: grid; place-items: center; width: 2.7rem; height: 2.7rem; margin: 0 auto; border: 1px solid var(--hairline); border-radius: .75rem; color: var(--quiet); background: var(--pill); font-size: 1.2rem; }
-.field-label { display: block; margin-bottom: .45rem; color: var(--quiet); font-size: .7rem; }
 .inspector-content input { width: 100%; min-height: 2.3rem; padding: .5rem .6rem; border: 1px solid var(--hairline); border-radius: .4rem; outline: 0; color: var(--text); background: var(--surface-bubble); font-family: "Cascadia Code", Consolas, monospace; font-size: .7rem; }
 .inspector-content input:focus { border-color: #3a3a3f; }
-.helper-text { margin: .7rem 0 1rem; color: var(--quiet); font-size: .72rem; line-height: 1.6; }
 .approval-card { margin-top: .85rem; padding: .8rem; border: 1px solid rgb(229 92 54 / 35%); border-radius: .5rem; background: rgb(229 92 54 / 7%); }
 .approval-warning { margin-bottom: .55rem; color: var(--accent); font-size: .72rem; font-weight: 650; }
 .approval-card code { display: block; padding: .55rem; overflow-wrap: anywhere; border-radius: .35rem; color: var(--text-secondary); background: var(--surface-bubble); font-family: "Cascadia Code", Consolas, monospace; font-size: .68rem; line-height: 1.5; }
@@ -396,7 +394,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px
 .approval-actions .primary-button { border: 1px solid rgb(52 211 153 / 55%); color: #08130f; background: var(--success); box-shadow: 0 .2rem .7rem rgb(52 211 153 / 18%); }
 .approval-actions .primary-button:hover { color: #06100c; background: #72e0b5; }
 .approval-actions .secondary-button, .approval-actions .primary-button { flex: 0 1 auto; white-space: nowrap; }
-.is-approval-panel .inspector-content { min-width: 0; }
+/* 审批卡内联在会话流里，紧跟触发它的那条回复。 */
+.inline-approval { margin: .2rem 0 1rem; }
+.inline-approval small { max-width: 100%; }
+.is-diff-panel .inspector-content { min-width: 0; }
 .files-placeholder { padding: 14vh 1rem; text-align: center; }
 .files-placeholder h2 { margin: .9rem 0 .35rem; color: #e2e0db; font-size: 1.1rem; }
 .files-placeholder p { margin: 0 auto 1rem; max-width: 24rem; color: #85837d; font-size: .78rem; line-height: 1.6; }
@@ -893,8 +894,8 @@ body, .app-window, .app-shell, .workspace, .workspace-body, .conversation-pane {
   .composer { min-height: 7.8rem; border-radius: .75rem; }
   .empty-conversation .composer { min-height: 7.2rem; }
   .composer textarea { min-height: 3.7rem; }
-  .is-approval-panel { max-height: none; }
-  .is-approval-panel .inspector-content { padding: .8rem; }
+  .is-diff-panel { max-height: none; }
+  .is-diff-panel .inspector-content { padding: .8rem; }
   .approval-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .approval-actions .primary-button { grid-column: 1 / -1; order: -1; width: 100%; }
   .approval-actions .secondary-button { width: 100%; }
@@ -1001,12 +1002,22 @@ body, .app-window, .app-shell, .workspace, .workspace-body, .conversation-pane {
 .login-primary:hover { background: #15803d; }
 .login-notice { color: #9aa3af; font-size: 12px; line-height: 1.5; }
 
-/* Balance chip + recharge dialog (P1-4). The chip lives in the sidebar
-   footer next to settings; the dialog reuses the login overlay language. */
-.balance-chip { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; height: 36px; padding: 0 12px; border-radius: 8px; border: 1px solid rgb(255 255 255 / 10%); background: #1a1d23; color: inherit; cursor: pointer; }
-.balance-chip:hover { background: #21252d; }
-.balance-value { font-size: 12px; color: #c7cdd6; }
-.balance-recharge { font-size: 12px; font-weight: 600; color: #16a34a; }
+/* Settings dialog: account session and the recharge entry (P1-4) open from
+   here; nothing account-related sits as permanent sidebar chrome. The card
+   and the recharge dialog stacked on top share the login overlay language. */
+.settings-overlay { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: rgb(8 9 12 / 84%); backdrop-filter: blur(6px); }
+.settings-card { width: 340px; display: flex; flex-direction: column; gap: 12px; padding: 24px; border-radius: 14px; background: #15171c; border: 1px solid rgb(255 255 255 / 8%); box-shadow: 0 18px 50px rgb(0 0 0 / 50%); outline: none; }
+.settings-section { display: flex; flex-direction: column; gap: 12px; }
+.settings-account { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgb(255 255 255 / 8%); background: #0e1013; }
+.settings-avatar { display: grid; flex: 0 0 auto; place-items: center; width: 34px; height: 34px; border-radius: 50%; color: #4ade80; background: #1d2026; font-size: 14px; font-weight: 600; }
+.settings-account-copy { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.settings-account-copy strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.settings-account-copy small { color: #9aa3af; font-size: 11px; }
+.settings-balance { display: flex; align-items: center; justify-content: space-between; padding: 0 2px; }
+.settings-balance span { color: #9aa3af; font-size: 12px; }
+.settings-balance strong { color: #4ade80; font-size: 14px; }
+.settings-actions { display: flex; gap: 8px; }
+.settings-actions .login-primary, .settings-actions .login-secondary { flex: 1; }
 .recharge-overlay { position: fixed; inset: 0; z-index: 80; display: flex; align-items: center; justify-content: center; background: rgb(8 9 12 / 84%); backdrop-filter: blur(6px); }
 .recharge-card { width: 340px; display: flex; flex-direction: column; gap: 12px; padding: 24px; border-radius: 14px; background: #15171c; border: 1px solid rgb(255 255 255 / 8%); box-shadow: 0 18px 50px rgb(0 0 0 / 50%); }
 .recharge-head { display: flex; align-items: center; justify-content: space-between; }

@@ -6,7 +6,7 @@ import "./styles.css";
 
 const brandFavicon = new URL("./brand-favicon.png", import.meta.url).href;
 
-type Tool = "diff" | "approval" | "files" | null;
+type Tool = "diff" | "files" | null;
 type FileEntry = { name: string; path: string; kind: "dir" | "file" };
 const fileGlyphs: Record<string, string> = { json: "{}", jsonc: "{}", lock: "{}", md: "MD", mdx: "MD", ts: "TS", tsx: "TS", js: "JS", jsx: "JS", mjs: "JS", cjs: "JS", py: "PY", rs: "RS", go: "GO", css: "CSS", scss: "CSS", html: "<>", htm: "<>", xml: "<>", svg: "<>", yml: "YML", yaml: "YML", toml: "TOML", sh: "SH", ps1: "PS", sql: "SQL", zip: "ZIP", gz: "ZIP" };
 function fileGlyph(name: string) {
@@ -812,6 +812,29 @@ function ReasoningBlock({ steps }: { steps?: string[] }) {
   </div>;
 }
 
+// Approval lives in the conversation flow, right under the reply that asked
+// for it; the decision buttons reuse the same response payloads as before.
+function ApprovalInlineCard({ approval, onDecide }: { approval: Approval; onDecide: (action: "accept" | "session" | "decline" | "cancel") => void }) {
+  return <div className="approval-card inline-approval">
+    <div className="approval-warning">{approvalWarningForKind[approval.kind]}</div>
+    {approval.command && <code>{approval.command}</code>}
+    {approval.detail && <p className="approval-reason">{approval.detail}</p>}
+    {approval.cwd && <small title={approval.cwd}>{approval.cwd}</small>}
+    {approval.reason && <p className="approval-reason">{approval.reason}</p>}
+    <div className="approval-actions">
+      {approval.kind === "userInput" || approval.kind === "elicitation"
+        ? <button className="primary-button" onClick={() => onDecide("cancel")}>取消</button>
+        : <>
+          <button className="secondary-button" onClick={() => onDecide("decline")}>拒绝</button>
+          {(approval.kind === "command" || approval.kind === "fileChange") && <button className="secondary-button" onClick={() => onDecide("cancel")}>取消</button>}
+          {(approval.kind === "command" || approval.kind === "fileChange") && <button className="secondary-button" onClick={() => onDecide("session")}>本会话允许</button>}
+          {approval.kind === "permissions" && <button className="secondary-button" onClick={() => onDecide("session")}>允许（本会话）</button>}
+          <button className="primary-button" onClick={() => onDecide("accept")}>{approval.kind === "command" ? "允许一次" : approval.kind === "permissions" ? "允许（本回合）" : "允许"}</button>
+        </>}
+    </div>
+  </div>;
+}
+
 function commandFromTool(tool: ToolCall) {
   if (tool.name !== "exec_command" || !tool.args || typeof tool.args !== "object") return "";
   const command = (tool.args as Record<string, unknown>).command;
@@ -941,6 +964,80 @@ function LoginOverlay({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
+// Settings dialog (opened from the sidebar footer): account session and the
+// recharge entry live here instead of permanent sidebar chrome. Signing in or
+// out re-reads app state; the recharge dialog stacks on top of this one.
+function SettingsModal({ user, authRequired, billing, onClose, onOpenRecharge, onSessionChanged }: {
+  user: { id: string; account: string; kind: string } | null;
+  authRequired: boolean;
+  billing: { signedIn: boolean; totalCredits: number | null } | null;
+  onClose: () => void;
+  onOpenRecharge: () => void;
+  onSessionChanged: () => void;
+}) {
+  const [account, setAccount] = useState("");
+  const [code, setCode] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function requestCode() {
+    if (!account.trim() || busy) return;
+    setBusy(true); setNotice("");
+    try {
+      const result = await window.desktop.requestCode(account.trim());
+      setNotice(typeof result.devCode === "string" ? `开发验证码：${result.devCode}` : "验证码已发送");
+    } catch (error) { setNotice(`获取验证码失败：${error instanceof Error ? error.message : String(error)}`); }
+    finally { setBusy(false); }
+  }
+  async function login() {
+    if (!account.trim() || !code.trim() || busy) return;
+    setBusy(true); setNotice("");
+    try {
+      await window.desktop.login(account.trim(), code.trim());
+      setAccount(""); setCode(""); setNotice("");
+      onSessionChanged();
+    } catch (error) { setNotice(`登录失败：${error instanceof Error ? error.message : String(error)}`); }
+    finally { setBusy(false); }
+  }
+  async function logout() {
+    if (busy) return;
+    setBusy(true); setNotice("");
+    try {
+      await window.desktop.logout();
+      onSessionChanged();
+    } catch (error) { setNotice(`退出登录失败：${error instanceof Error ? error.message : String(error)}`); }
+    finally { setBusy(false); }
+  }
+  return (
+    <div className="settings-overlay" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }} tabIndex={-1} ref={(element) => element?.focus()}>
+      <div className="settings-card" role="dialog" aria-modal="true" aria-label="设置">
+        <div className="recharge-head"><strong>设置</strong><button className="recharge-close" onClick={onClose} aria-label="关闭">×</button></div>
+        <div className="settings-section">
+          <div className="recharge-label">账号</div>
+          {user ? <>
+            <div className="settings-account">
+              <span className="settings-avatar" aria-hidden="true">{user.account.slice(0, 1).toUpperCase()}</span>
+              <div className="settings-account-copy"><strong>{user.account}</strong><small>{user.kind === "phone" ? "手机号登录" : user.kind === "email" ? "邮箱登录" : user.kind}</small></div>
+            </div>
+            <div className="settings-balance"><span>当前余额</span><strong>{billing?.signedIn && billing.totalCredits != null ? `${formatCredits(billing.totalCredits)} 额度` : "获取中…"}</strong></div>
+            <div className="settings-actions">
+              <button className="login-primary" onClick={onOpenRecharge}>充值</button>
+              <button className="login-secondary" onClick={() => void logout()} disabled={busy}>退出登录</button>
+            </div>
+          </> : authRequired ? <>
+            <input className="login-input" placeholder="手机号或邮箱" value={account} autoComplete="username" onChange={(event) => setAccount(event.target.value)} />
+            <div className="login-row">
+              <input className="login-input" placeholder="验证码" value={code} autoComplete="one-time-code" onChange={(event) => setCode(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void login(); }} />
+              <button className="login-secondary" onClick={() => void requestCode()} disabled={busy}>获取验证码</button>
+            </div>
+            <button className="login-primary" onClick={() => void login()} disabled={busy}>{busy ? "登录中…" : "登录"}</button>
+          </> : <div className="login-notice">当前为本地开发模式，未启用账号登录。</div>}
+        </div>
+        {notice && <div className="login-notice">{notice}</div>}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [state, setState] = useState<{
     projectPath: string | null;
@@ -988,6 +1085,7 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [billing, setBilling] = useState<{ signedIn: boolean; totalCredits: number | null } | null>(null);
   const [rechargeOpen, setRechargeOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // Model catalog comes from the backend (login bootstrap) when available;
   // the static list is only the offline fallback.
   const modelOptions = state?.models?.length ? state.models : fallbackModelOptions;
@@ -997,7 +1095,6 @@ function App() {
     "找出最近修改中可能的类型错误"
   ]);
   const [diff, setDiff] = useState<Diff>();
-  const [command, setCommand] = useState("node -e \"console.log('local approval ok')\"");
   const [pendingApproval, setPendingApproval] = useState<Approval>();
   const [notice, setNotice] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -1123,7 +1220,8 @@ function App() {
   useEffect(() => {
     const element = conversationScrollRef.current;
     if (element) element.scrollTop = element.scrollHeight;
-  }, [messages]);
+    // 内联审批卡出现在回复下方，出现时也要滚进可视区。
+  }, [messages, pendingApproval]);
 
   useEffect(() => {
     if (goalInputMode) composerInputRef.current?.focus();
@@ -1178,7 +1276,6 @@ function App() {
       // fresh session until a delta or state refresh adopts the new thread.
       if (!approval.threadId || approval.threadId === activeThreadIdRef.current || activeThreadIdRef.current === null) {
         setPendingApproval(approval);
-        setTool("approval");
       }
     });
   }, []);
@@ -1380,7 +1477,6 @@ function App() {
       activeAssistantId.current = isRunning ? runningAssistantId ?? null : null;
       setSending(isRunning);
       setPendingApproval(approvalsByThread.current.get(threadId));
-      if (approvalsByThread.current.has(threadId)) setTool("approval");
       void hydrateImagePreviews(chat);
       setErrorMessage("");
       setState(nextState);
@@ -1743,17 +1839,6 @@ function App() {
     setDiff(undefined);
   }
 
-  async function requestApproval() {
-    try {
-      const request = await window.desktop.requestCommand(command);
-      setPendingApproval(request);
-      setTool("approval");
-      setNotice("等待你的命令审批");
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
-    }
-  }
-
   async function respondToApproval(approval: Approval, action: "accept" | "session" | "decline" | "cancel") {
     if (approval.source !== "app-server" || approval.requestId === undefined || !approval.method) return;
     await window.desktop.respondApproval(approval.requestId, approval.method, approvalPayload(approval, action));
@@ -1934,6 +2019,7 @@ function App() {
     <div className="app-window">
       {state?.auth?.required && !state.auth.user && <LoginOverlay onLoggedIn={() => { void window.desktop.state().then(setState); refreshBilling(); }} />}
       {rechargeOpen && <RechargeModal onClose={() => setRechargeOpen(false)} onSettled={refreshBilling} />}
+      {settingsOpen && <SettingsModal user={state?.auth?.user ?? null} authRequired={Boolean(state?.auth?.required)} billing={billing} onClose={() => setSettingsOpen(false)} onOpenRecharge={() => { refreshBilling(); setRechargeOpen(true); }} onSessionChanged={() => { void window.desktop.state().then(setState); refreshBilling(); }} />}
       <div className="global-menubar">
         <div className="window-controls"><button className="menu-icon" title="切换侧栏" aria-label="切换侧栏">◧</button><button className="menu-icon" title="后退" aria-label="后退">←</button><button className="menu-icon muted-icon" title="前进" aria-label="前进">→</button></div>
         <nav className="app-menus" aria-label="应用菜单"><button>文件</button><button>编辑</button><button>视图</button><button>帮助</button></nav>
@@ -2003,13 +2089,7 @@ function App() {
         </div>
 
         <div className="sidebar-footer">
-          {state?.auth?.user && (
-            <button className="balance-chip" title="余额与充值" onClick={() => { refreshBilling(); setRechargeOpen(true); }}>
-              <span className="balance-value">{billing?.signedIn && billing.totalCredits != null ? `${formatCredits(billing.totalCredits)} 额度` : "余额…"}</span>
-              <span className="balance-recharge">充值</span>
-            </button>
-          )}
-          <button className="settings-button"><Settings size={17} /> 设置</button>
+          <button className="settings-button" onClick={() => { refreshBilling(); setSettingsOpen(true); }}><Settings size={17} /> 设置</button>
         </div>
       </aside>
       <div className={`sidebar-divider ${sidebarCollapsed ? "is-collapsed" : ""}`} role="separator" aria-label="调整侧栏宽度" aria-orientation="vertical" onPointerDown={(event) => { event.preventDefault(); resizingSidebarRef.current = true; }} onDoubleClick={() => setSidebarCollapsed((collapsed) => !collapsed)} />
@@ -2037,7 +2117,8 @@ function App() {
                   </div>
                 </div>}
                 {displayMessages.map((message) => message.role === "user" ? <div className="message user-message" key={message.id}><div className="message-content"><UserMessageContent message={message} onPreview={(src, name) => setPreviewImage({ src, name })} /></div></div> : <div className="message assistant-message" key={message.id}><div className="message-content"><div className="assistant-identity"><img src={brandFavicon} alt="" aria-hidden="true" /><span>Codex Harness</span></div><AssistantParts message={message} /><div className="message-footer">{message.streaming ? <span className="thinking-status"><span>思考中</span><span className="stream-caret" aria-hidden="true" /></span> : <><button type="button" className="message-copy" title="复制回复" aria-label="复制回复" onClick={() => void navigator.clipboard?.writeText(message.content)}><Copy size={18} /></button>{message.completedAt !== undefined && <time className="message-time" dateTime={new Date(message.completedAt).toISOString()}>{formatMessageTime(message.completedAt)}</time>}</>}</div></div></div>)}
-                {(diff || pendingApproval) && <div className="activity-strip"><span>◈</span><span>{diff ? "有一项文件差异待确认" : "有一条命令等待审批"}</span><button onClick={() => setTool(diff ? "diff" : "approval")}>查看</button></div>}
+                {pendingApproval && <ApprovalInlineCard approval={pendingApproval} onDecide={(action) => void (action === "accept" ? executeApproval() : action === "session" ? approveForSession() : action === "decline" ? rejectApproval() : cancelApproval())} />}
+                {diff && <div className="activity-strip"><span>◈</span><span>有一项文件差异待确认</span><button onClick={() => setTool("diff")}>查看</button></div>}
               </div>
             </div>
 
@@ -2091,8 +2172,8 @@ function App() {
             <FileCodeView name={openedFile.path.split(/[\\/]/).pop() ?? openedFile.path} content={openedFile.content} />
           </aside>}
 
-          {tool !== null && (tool !== "files" || !fileTreeCollapsed) && <aside className={`inspector ${tool === "files" ? "is-file-panel" : "is-approval-panel"}`}>
-            {tool === "files" ? <div className="inspector-header inspector-header-compact"><h2>打开文件</h2><div className="inspector-header-actions"><button className="icon-button" title="收起文件树" aria-label="收起文件树" onClick={() => { setFileTreeCollapsed(true); if (!openedFile) setTool(null); }}><PanelRightClose size={15} /></button><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div></div> : <div className="inspector-header"><div><span className="section-label">工具面板</span><h2>{tool === "diff" ? "文件差异" : "命令审批"}</h2></div><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div>}
+          {tool !== null && (tool !== "files" || !fileTreeCollapsed) && <aside className={`inspector ${tool === "files" ? "is-file-panel" : "is-diff-panel"}`}>
+            {tool === "files" ? <div className="inspector-header inspector-header-compact"><h2>打开文件</h2><div className="inspector-header-actions"><button className="icon-button" title="收起文件树" aria-label="收起文件树" onClick={() => { setFileTreeCollapsed(true); if (!openedFile) setTool(null); }}><PanelRightClose size={15} /></button><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div></div> : <div className="inspector-header"><div><span className="section-label">工具面板</span><h2>文件差异</h2></div><button className="icon-button" title="关闭面板" aria-label="关闭面板" onClick={() => setTool(null)}>×</button></div>}
             {tool === "diff" ? <div className="inspector-content">
               {diff ? <><div className="file-heading"><span className="file-type">TXT</span><div><strong>{diff.path.split(/[\\/]/).pop()}</strong><small>{diff.status === "created" ? "新文件" : "待修改"}</small></div></div><pre className="diff-view"><span className="diff-line diff-context">@@ 本地工作区</span>{diff.before && <span className="diff-line removed">- {diff.before}</span>}<span className="diff-line added">+ {diff.after}</span></pre><button className="primary-button full-button" onClick={() => void apply()}>确认并写入本机</button></> : <div className="empty-state"><div className="placeholder-icon">⊞</div><p>生成差异后，会在这里等待你的确认。</p><button className="secondary-button" onClick={() => void preview()}>生成差异</button></div>}
             </div> : tool === "files" ? <div className="inspector-content file-explorer">
@@ -2105,27 +2186,7 @@ function App() {
                     : <div className="file-notice">无匹配文件</div>
                   : renderFileTree(state.projectPath, 0)}
               </div> : <div className="file-empty"><FolderOpen size={26} /><strong>打开文件</strong><p>从工作区目录树中选择文件</p><button type="button" className="secondary-button" onClick={() => void chooseProject()}>选择文件夹…</button></div>}
-            </div> : <div className="inspector-content">
-              <label className="field-label" htmlFor="command-input">待执行命令</label><input id="command-input" value={command} onChange={(event) => setCommand(event.target.value)} />
-              {pendingApproval ? <div className="approval-card">
-                <div className="approval-warning">{approvalWarningForKind[pendingApproval.kind]}</div>
-                <code>{pendingApproval.command}</code>
-                {pendingApproval.detail && <p className="approval-reason">{pendingApproval.detail}</p>}
-                {pendingApproval.cwd && <small>{pendingApproval.cwd}</small>}
-                {pendingApproval.reason && <p className="approval-reason">{pendingApproval.reason}</p>}
-                <div className="approval-actions">
-                  {pendingApproval.kind === "userInput" || pendingApproval.kind === "elicitation"
-                    ? <button className="primary-button" onClick={() => void cancelApproval()}>取消</button>
-                    : <>
-                      <button className="secondary-button" onClick={() => void rejectApproval()}>拒绝</button>
-                      {(pendingApproval.kind === "command" || pendingApproval.kind === "fileChange") && <button className="secondary-button" onClick={() => void cancelApproval()}>取消</button>}
-                      {(pendingApproval.kind === "command" || pendingApproval.kind === "fileChange") && <button className="secondary-button" onClick={() => void approveForSession()}>本会话允许</button>}
-                      {pendingApproval.kind === "permissions" && <button className="secondary-button" onClick={() => void approveForSession()}>允许（本会话）</button>}
-                      <button className="primary-button" onClick={() => void executeApproval()}>{pendingApproval.kind === "command" ? "允许一次" : pendingApproval.kind === "permissions" ? "允许（本回合）" : "允许"}</button>
-                    </>}
-                </div>
-              </div> : <><p className="helper-text">命令只会在已选择的本机项目目录中运行。</p><button className="primary-button full-button" onClick={() => void requestApproval()}>请求执行</button></>}
-            </div>}
+            </div> : null}
           </aside>}
         </div>
       </section>
