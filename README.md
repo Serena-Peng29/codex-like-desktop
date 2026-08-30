@@ -3,6 +3,8 @@
 一个开源的 AI 编程桌面客户端（Windows / macOS）：内置 Codex App Server，连接本地项目完成对话、文件修改和命令审批；模型请求统一经过自建的 OpenAI 兼容网关，配合账号登录与「套餐额度 + 按 token 计费」的服务端账本。
 
 > 项目与 OpenAI 无官方关系；上游基于固定 commit 的 [openai/codex](https://github.com/openai/codex)（`25a6e31`）开源代码，产品使用自有品牌。
+>
+> **与官方 Codex 完全隔离**：内置 sidecar 使用独立的 `CODEX_HOME`（应用数据目录下的 `codex-home`）运行，不读写官方 Codex CLI 的 `~/.codex`——会话历史、登录态、配置、插件互不污染；也不要求、不依赖用户安装 Codex CLI，卸载本产品不影响官方 CLI 的任何数据。
 
 ![alt text](image.png)
 
