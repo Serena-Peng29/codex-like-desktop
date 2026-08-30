@@ -20,6 +20,7 @@ vendor/codex/
 
 # Local runtime state
 .codex/
+.agents/
 .data/
 tmp/
 output/
