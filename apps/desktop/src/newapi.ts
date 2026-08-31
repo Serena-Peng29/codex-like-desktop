@@ -1,5 +1,5 @@
-// Client for the deployed new-api gateway (https://pevo.ai, fixed v1.0.0-rc.25
-// interface surface). The desktop product owns no backend of its own for this
+// Client for the deployed new-api gateway (interface surface pinned to
+// v1.0.0-rc.25). The desktop product owns no backend of its own for this
 // phase: users log in with their gateway account, the client obtains that
 // user's own relay key through the dashboard API, and every model call goes to
 // the gateway with that key. Passwords and tokens only ever pass through
@@ -9,26 +9,26 @@
 // new-api answers business failures with success:false (dashboard endpoints)
 // or an HTTP error; "no such user" and "wrong password" are indistinguishable
 // by design, and login() recovers from that ambiguity via register.
-export class PevoError extends Error {
+export class NewApiError extends Error {
   constructor(message: string, readonly status: number) {
     super(message);
   }
 }
 
-export type PevoUser = { id: number; username: string; displayName: string; email: string };
-export type PevoSession = { baseUrl: string; dashboardToken: string; apiKey: string; user: PevoUser };
-export type PevoBalance = { usd: number | null; unlimited: boolean };
+export type NewApiUser = { id: number; username: string; displayName: string; email: string };
+export type NewApiSession = { baseUrl: string; dashboardToken: string; apiKey: string; user: NewApiUser };
+export type NewApiBalance = { usd: number | null; unlimited: boolean };
 
 // TokenStatusEnabled in new-api; disabled/expired keys are not reused.
 const tokenStatusEnabled = 1;
 // Gateway quota is an integer counter; quotaPerUnit of it equals one US dollar
-// (pevo.ai serves quota_per_unit=500000 and displays USD).
+// (the gateway serves quota_per_unit and displays USD).
 const defaultQuotaPerUnit = 500_000;
 // Default name of the dedicated relay key this client manages for the desktop;
 // a missing key is created on first login, an existing one is reused untouched.
-const defaultTokenName = "way2agi-desktop";
+const defaultTokenName = "codex-harness";
 
-export type PevoClientOptions = {
+export type NewApiClientOptions = {
   baseUrl: string;
   // Injectable for tests; main.ts passes Electron net.fetch (system-proxy aware).
   fetchImpl?: typeof fetch;
@@ -36,7 +36,7 @@ export type PevoClientOptions = {
   tokenName?: string;
 };
 
-export function createPevoClient(options: PevoClientOptions) {
+export function createNewApiClient(options: NewApiClientOptions) {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const doFetch = options.fetchImpl ?? ((url: string, init?: RequestInit) => fetch(url, init));
   const quotaPerUnit = options.quotaPerUnit ?? defaultQuotaPerUnit;
@@ -63,11 +63,11 @@ export function createPevoClient(options: PevoClientOptions) {
         ? (envelope.error as { message: string }).message
         : "")
       || `gateway_error_${response.status}`;
-    if (envelope.success === false || response.status >= 400) throw new PevoError(message, response.status);
+    if (envelope.success === false || response.status >= 400) throw new NewApiError(message, response.status);
     return ("data" in envelope ? envelope.data : envelope) as T;
   }
 
-  function parseUser(raw: unknown): PevoUser {
+  function parseUser(raw: unknown): NewApiUser {
     const value = (raw ?? {}) as { id?: unknown; username?: unknown; display_name?: unknown; email?: unknown };
     return {
       id: Number(value.id ?? 0),
@@ -82,33 +82,33 @@ export function createPevoClient(options: PevoClientOptions) {
   // first login doubles as signup. new-api reports "no such user" and "wrong
   // password" identically, so a failed register cannot disambiguate; the error
   // carries both facts (login message + why signup did not happen).
-  async function login(account: string, password: string): Promise<{ baseUrl: string; dashboardToken: string; user: PevoUser }> {
+  async function login(account: string, password: string): Promise<{ baseUrl: string; dashboardToken: string; user: NewApiUser }> {
     const name = account.trim();
     try {
       const session = await dashboardLogin(name, password);
       return { baseUrl, ...session };
     } catch (error) {
-      if (!(error instanceof PevoError)) throw error;
+      if (!(error instanceof NewApiError)) throw error;
       try {
         await call<unknown>("/api/user/register", { method: "POST", body: JSON.stringify({ username: name, password }) });
       } catch (caught) {
-        if (!(caught instanceof PevoError)) throw caught;
+        if (!(caught instanceof NewApiError)) throw caught;
         // The login failure is the primary fact; the parenthetical explains
         // why automatic signup could not rescue a brand-new account.
-        throw new PevoError(`${error.message}（自动注册未成功：${caught.message}）`, error.status);
+        throw new NewApiError(`${error.message}（自动注册未成功：${caught.message}）`, error.status);
       }
       const session = await dashboardLogin(name, password);
       return { baseUrl, ...session };
     }
   }
 
-  async function dashboardLogin(name: string, password: string): Promise<{ dashboardToken: string; user: PevoUser }> {
+  async function dashboardLogin(name: string, password: string): Promise<{ dashboardToken: string; user: NewApiUser }> {
     const data = await call<{ access_token?: unknown; user?: unknown; require_2fa?: unknown }>("/api/user/login", {
       method: "POST",
       body: JSON.stringify({ username: name, password })
     });
-    if (data?.require_2fa) throw new PevoError("该账号已开启两步验证，请先在 pevo.ai 网页端处理", 200);
-    if (typeof data?.access_token !== "string" || !data.access_token) throw new PevoError("invalid_login_response", 200);
+    if (data?.require_2fa) throw new NewApiError("该账号已开启两步验证，请先在网关网页端处理", 200);
+    if (typeof data?.access_token !== "string" || !data.access_token) throw new NewApiError("invalid_login_response", 200);
     return { dashboardToken: data.access_token, user: parseUser(data.user) };
   }
 
@@ -136,7 +136,7 @@ export function createPevoClient(options: PevoClientOptions) {
     }, dashboardToken);
     const refreshed = await listTokens(dashboardToken);
     const created = refreshed.find((item) => item?.name === tokenName);
-    if (!created || typeof created.id !== "number") throw new PevoError("token_create_failed", 200);
+    if (!created || typeof created.id !== "number") throw new NewApiError("token_create_failed", 200);
     return requestTokenKey(dashboardToken, created.id);
   }
 
@@ -147,7 +147,7 @@ export function createPevoClient(options: PevoClientOptions) {
 
   async function requestTokenKey(dashboardToken: string, id: number): Promise<string> {
     const data = await call<{ key?: unknown }>(`/api/token/${id}/key`, { method: "POST" }, dashboardToken);
-    if (typeof data?.key !== "string" || !data.key) throw new PevoError("token_key_missing", 200);
+    if (typeof data?.key !== "string" || !data.key) throw new NewApiError("token_key_missing", 200);
     return data.key;
   }
 
@@ -163,14 +163,14 @@ export function createPevoClient(options: PevoClientOptions) {
   // draw from it. Without a live dashboard token the relay-key usage endpoint
   // is the fallback; an unlimited key reports unlimited instead of a fake
   // number, and an unreachable gateway reports unknown (null), never zero.
-  async function balance(apiKey: string, dashboardToken?: string): Promise<PevoBalance> {
+  async function balance(apiKey: string, dashboardToken?: string): Promise<NewApiBalance> {
     if (dashboardToken) {
       try {
         const self = await call<{ quota?: unknown }>("/api/user/self", { method: "GET" }, dashboardToken);
         const quota = Number(self?.quota);
         if (Number.isFinite(quota)) return { usd: toUsd(quota), unlimited: false };
       } catch (error) {
-        if (!(error instanceof PevoError) || (error.status !== 401 && error.status !== 403)) return { usd: null, unlimited: false };
+        if (!(error instanceof NewApiError) || (error.status !== 401 && error.status !== 403)) return { usd: null, unlimited: false };
         // Expired dashboard session: fall through to the relay-key endpoint.
       }
     }
@@ -191,7 +191,7 @@ export function createPevoClient(options: PevoClientOptions) {
       await call<unknown>("/api/usage/token/", { method: "GET" }, apiKey);
       return true;
     } catch (error) {
-      if (error instanceof PevoError && (error.status === 401 || error.status === 403)) return false;
+      if (error instanceof NewApiError && (error.status === 401 || error.status === 403)) return false;
       return null;
     }
   }
@@ -203,4 +203,4 @@ export function createPevoClient(options: PevoClientOptions) {
   return { baseUrl, login, getOrCreateToken, listModels, balance, isKeyValid };
 }
 
-export type PevoClient = ReturnType<typeof createPevoClient>;
+export type NewApiClient = ReturnType<typeof createNewApiClient>;

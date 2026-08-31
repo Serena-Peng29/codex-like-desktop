@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach } from "vitest";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { createPevoClient, PevoError } from "./pevo.js";
+import { createNewApiClient, NewApiError } from "./newapi.js";
 
 // Stub of the new-api v1.0.0-rc.25 surface the desktop touches, shaped after
 // the upstream controllers: envelope differences between /api/user/*,
@@ -25,7 +25,7 @@ function createStub(options: { registerEnabled: boolean }) {
       { id: 2, username: "bob", email: "", password: "pw-bob", quota: 0 }
     ] as StubUser[],
     tokens: [
-      { id: 11, userId: 1, name: "way2agi-desktop", status: 1, key: "sk-alice-existing", remainQuota: 0, usedQuota: 0, unlimited: true }
+      { id: 11, userId: 1, name: "codex-harness", status: 1, key: "sk-alice-existing", remainQuota: 0, usedQuota: 0, unlimited: true }
     ] as StubToken[],
     registerEnabled: options.registerEnabled,
     nextUserId: 3,
@@ -112,7 +112,7 @@ function createStub(options: { registerEnabled: boolean }) {
   return { server, state };
 }
 
-describe("pevo new-api client", () => {
+describe("new-api gateway client", () => {
   let stub: ReturnType<typeof createStub> | null = null;
 
   afterEach(() => { void stub?.server.close(); stub = null; });
@@ -120,7 +120,7 @@ describe("pevo new-api client", () => {
   async function startedClient(options: { registerEnabled: boolean }) {
     stub = createStub(options);
     const base = await listen(stub.server);
-    return { client: createPevoClient({ baseUrl: base }), base };
+    return { client: createNewApiClient({ baseUrl: base }), base };
   }
 
   it("logs in with username, reuses the existing desktop token, and keeps the full key", async () => {
@@ -154,7 +154,7 @@ describe("pevo new-api client", () => {
   it("honors a custom token name for get-or-create", async () => {
     stub = createStub({ registerEnabled: true });
     const base = await listen(stub.server);
-    const client = createPevoClient({ baseUrl: base, tokenName: "custom-key" });
+    const client = createNewApiClient({ baseUrl: base, tokenName: "custom-key" });
     const session = await client.login("bob", "pw-bob");
     await client.getOrCreateToken(session.dashboardToken);
     expect(stub.state.tokens.some((token) => token.userId === 2 && token.name === "custom-key")).toBe(true);
@@ -172,18 +172,18 @@ describe("pevo new-api client", () => {
   it("combines the login failure with why auto-registration did not happen", async () => {
     const { client } = await startedClient({ registerEnabled: false });
     const error = await client.login("nobody", "pw-nobody").then(() => null, (caught: unknown) => caught);
-    expect(error).toBeInstanceOf(PevoError);
-    expect((error as PevoError).message).toBe("用户名或密码错误（自动注册未成功：管理员关闭了新用户注册）");
+    expect(error).toBeInstanceOf(NewApiError);
+    expect((error as NewApiError).message).toBe("用户名或密码错误（自动注册未成功：管理员关闭了新用户注册）");
     // An existing account with a wrong password reports the login failure too.
     const wrong = await client.login("alice", "wrong").then(() => null, (caught: unknown) => caught);
-    expect((wrong as PevoError).message).toBe("用户名或密码错误（自动注册未成功：管理员关闭了新用户注册）");
+    expect((wrong as NewApiError).message).toBe("用户名或密码错误（自动注册未成功：管理员关闭了新用户注册）");
   });
 
   it("rejects a wrong password without leaving the stub changed", async () => {
     const { client } = await startedClient({ registerEnabled: true });
     const error = await client.login("alice", "wrong").then(() => null, (caught: unknown) => caught);
-    expect(error).toBeInstanceOf(PevoError);
-    expect((error as PevoError).message).toBe("用户名或密码错误（自动注册未成功：用户名已存在）");
+    expect(error).toBeInstanceOf(NewApiError);
+    expect((error as NewApiError).message).toBe("用户名或密码错误（自动注册未成功：用户名已存在）");
   });
 
   it("lists models with the relay key", async () => {

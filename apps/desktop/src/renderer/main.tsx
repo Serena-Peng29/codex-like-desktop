@@ -846,7 +846,7 @@ function AssistantParts({ message }: { message: ChatMessage }) {
   </>;
 }
 
-// Full-screen login gate: shown when the pevo.ai account system is in play and
+// Full-screen login gate: shown when the gateway account system is in play and
 // no session is held. Everything else in the app stays behind it; a successful
 // login restarts the sidecar with the user's relay key injected by the main
 // process. A first-time account signs up automatically; a new account on a
@@ -869,7 +869,7 @@ function LoginOverlay({ onLoggedIn }: { onLoggedIn: () => void }) {
   return (
     <div className="login-overlay">
       <div className="login-card">
-        <div className="login-brand"><strong>Way2AGI Code</strong><span>登录后开始使用</span></div>
+        <div className="login-brand"><strong>Codex Harness</strong><span>登录后开始使用</span></div>
         <input className="login-input" placeholder="用户名或邮箱" value={account} autoComplete="username" onChange={(event) => setAccount(event.target.value)} />
         <input className="login-input" placeholder="密码" type="password" value={password} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void login(); }} />
         <button className="login-primary" onClick={() => void login()} disabled={busy}>{busy ? "登录中…" : "登录"}</button>
@@ -879,7 +879,7 @@ function LoginOverlay({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
-// Settings dialog (opened from the sidebar footer): pevo.ai account session,
+// Settings dialog (opened from the sidebar footer): gateway account session,
 // balance, and the top-up shortcut into the gateway's web console. Signing in
 // or out re-reads app state.
 function SettingsModal({ user, authRequired, billing, onClose, onSessionChanged }: {
@@ -921,7 +921,7 @@ function SettingsModal({ user, authRequired, billing, onClose, onSessionChanged 
           {user ? <>
             <div className="settings-account">
               <span className="settings-avatar" aria-hidden="true">{user.account.slice(0, 1).toUpperCase()}</span>
-              <div className="settings-account-copy"><strong>{user.account}</strong><small>{user.kind === "pevo" ? "pevo.ai 账号" : user.kind}</small></div>
+              <div className="settings-account-copy"><strong>{user.account}</strong><small>{user.kind === "gateway" ? "网关账号" : user.kind}</small></div>
             </div>
             <div className="settings-balance"><span>当前余额</span><strong>{billing?.signedIn ? billing.unlimited ? "不限量" : billing.balanceUsd != null ? `$${billing.balanceUsd.toFixed(2)}` : "—" : "获取中…"}</strong></div>
             <div className="settings-actions">

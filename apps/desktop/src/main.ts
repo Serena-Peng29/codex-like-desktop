@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { delimiter, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildTurnInputItems, type TurnInput } from "./turn-input.js";
-import { createPevoClient, type PevoSession } from "./pevo.js";
+import { createNewApiClient, type NewApiSession } from "./newapi.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -125,7 +125,7 @@ let projectPath: string | null = null;
 // env in packaged builds) — no gateway settings are baked into the code. The
 // inline literals below are only dormant last-resort defaults.
 let gatewayModel = "";
-const defaultModel = process.env.PEVO_DEFAULT_MODEL?.trim() || "gpt-5.6-sol";
+const defaultModel = process.env.NEWAPI_DEFAULT_MODEL?.trim() || "gpt-5.6-sol";
 // Model the sidecar is pinned to via -c: env wins, else the first model the
 // gateway advertised at login. Empty means "no override" — the gateway default
 // applies (the offline fallback below only feeds the plan-mode shim).
@@ -133,20 +133,22 @@ function effectiveModel(fallback = defaultModel) {
   return process.env.WAY2AGI_MODEL?.trim() || gatewayModel || fallback;
 }
 
-// The deployed new-api gateway (pevo.ai) is the whole backend for this phase:
-// account login, per-user relay key, balance and top-up. net.fetch follows the
-// system proxy, which plain Node fetch does not. The user's relay key is the
-// only long-lived credential; it is stored encrypted via safeStorage and handed
-// to the sidecar through the env var named by the provider's env_key.
-const pevoBaseUrl = (process.env.PEVO_BASE_URL ?? "https://pevo.ai").replace(/\/+$/, "");
-const pevoQuotaPerUnit = Number(process.env.PEVO_QUOTA_PER_UNIT);
-const pevo = createPevoClient({
-  baseUrl: pevoBaseUrl,
+// The deployed new-api gateway is the whole backend for this phase: account
+// login, per-user relay key, balance and top-up. net.fetch follows the system
+// proxy, which plain Node fetch does not. The user's relay key is the only
+// long-lived credential; it is stored encrypted via safeStorage and handed to
+// the sidecar through the env var named by the provider's env_key. The gateway
+// location itself is deployment configuration (NEWAPI_BASE_URL) and never a
+// code default.
+const newApiBaseUrl = (process.env.NEWAPI_BASE_URL ?? "").replace(/\/+$/, "");
+const newApiQuotaPerUnit = Number(process.env.NEWAPI_QUOTA_PER_UNIT);
+const newapi = createNewApiClient({
+  baseUrl: newApiBaseUrl,
   fetchImpl: net.fetch as unknown as typeof fetch,
-  ...(process.env.PEVO_TOKEN_NAME?.trim() ? { tokenName: process.env.PEVO_TOKEN_NAME.trim() } : {}),
-  ...(Number.isFinite(pevoQuotaPerUnit) && pevoQuotaPerUnit > 0 ? { quotaPerUnit: pevoQuotaPerUnit } : {})
+  ...(process.env.NEWAPI_TOKEN_NAME?.trim() ? { tokenName: process.env.NEWAPI_TOKEN_NAME.trim() } : {}),
+  ...(Number.isFinite(newApiQuotaPerUnit) && newApiQuotaPerUnit > 0 ? { quotaPerUnit: newApiQuotaPerUnit } : {})
 });
-const topupUrl = process.env.PEVO_TOPUP_URL ?? `${pevoBaseUrl}/console/topup`;
+const topupUrl = process.env.NEWAPI_TOPUP_URL ?? (newApiBaseUrl ? `${newApiBaseUrl}/console/topup` : "");
 
 type AuthUser = { id: string; account: string; kind: string };
 type AuthSession = { accessToken: string; user: AuthUser; gatewayBaseUrl?: string; models?: string[] };
@@ -159,7 +161,7 @@ const authSessionFile = () => join(app.getPath("userData"), "auth-session.enc");
 
 // Encrypted session blob: the per-user relay key plus the dashboard token it
 // was created with (used for balance reads; the password never persists).
-type StoredSession = { version: 1; baseUrl: string; dashboardToken: string; apiKey: string; user: PevoSession["user"] };
+type StoredSession = { version: 1; baseUrl: string; dashboardToken: string; apiKey: string; user: NewApiSession["user"] };
 
 function saveStoredSession(session: StoredSession) {
   if (!safeStorage.isEncryptionAvailable()) throw new Error("secure_storage_unavailable");
@@ -169,7 +171,7 @@ function loadStoredSession(): StoredSession | null {
   try {
     const parsed = JSON.parse(safeStorage.decryptString(readFileSync(authSessionFile()))) as Partial<StoredSession> | null;
     return parsed?.version === 1 && typeof parsed.apiKey === "string" && parsed.user ? parsed as StoredSession : null;
-  } catch { return null; } // first launch, or a pre-pevo refresh-token blob
+  } catch { return null; } // first launch, or an older refresh-token blob
 }
 function clearStoredSession() { try { rmSync(authSessionFile()); } catch { /* already gone */ } }
 
@@ -177,7 +179,7 @@ function adoptSession(stored: StoredSession, models: string[]): AuthSession {
   gatewayModel = process.env.WAY2AGI_MODEL?.trim() || models[0] || "";
   const session: AuthSession = {
     accessToken: stored.apiKey,
-    user: { id: String(stored.user.id), account: stored.user.displayName || stored.user.username, kind: "pevo" },
+    user: { id: String(stored.user.id), account: stored.user.displayName || stored.user.username, kind: "gateway" },
     gatewayBaseUrl: `${stored.baseUrl}/v1`,
     ...(models.length ? { models } : {})
   };
@@ -190,11 +192,11 @@ async function tryRestoreSession(): Promise<boolean> {
   if (!stored) return false;
   // Explicit auth failure invalidates the stored key; an unreachable gateway
   // (null) keeps the session so an offline start still shows history.
-  if (await pevo.isKeyValid(stored.apiKey) === false) {
+  if (await newapi.isKeyValid(stored.apiKey) === false) {
     clearStoredSession();
     return false;
   }
-  const client = stored.baseUrl === pevo.baseUrl ? pevo : createPevoClient({ baseUrl: stored.baseUrl, fetchImpl: net.fetch as unknown as typeof fetch });
+  const client = stored.baseUrl === newapi.baseUrl ? newapi : createNewApiClient({ baseUrl: stored.baseUrl, fetchImpl: net.fetch as unknown as typeof fetch });
   const models = await client.listModels(stored.apiKey).catch(() => [] as string[]);
   adoptSession(stored, models);
   return true;
@@ -477,10 +479,11 @@ app.whenReady().then(async () => {
     // Login (auto-registering a first-time account), then provision the user's
     // own relay key — the gateway account password is used here exactly once
     // and never stored anywhere.
-    const pevoSession = await pevo.login(account, password);
-    const apiKey = await pevo.getOrCreateToken(pevoSession.dashboardToken);
-    const models = await pevo.listModels(apiKey).catch(() => [] as string[]);
-    const stored: StoredSession = { version: 1, baseUrl: pevoSession.baseUrl, dashboardToken: pevoSession.dashboardToken, apiKey, user: pevoSession.user };
+    if (!newApiBaseUrl) throw new Error("未配置模型网关：请在环境变量 NEWAPI_BASE_URL 中设置网关地址");
+    const newApiSession = await newapi.login(account, password);
+    const apiKey = await newapi.getOrCreateToken(newApiSession.dashboardToken);
+    const models = await newapi.listModels(apiKey).catch(() => [] as string[]);
+    const stored: StoredSession = { version: 1, baseUrl: newApiSession.baseUrl, dashboardToken: newApiSession.dashboardToken, apiKey, user: newApiSession.user };
     saveStoredSession(stored);
     const session = adoptSession(stored, models);
     authRequired = false;
@@ -497,10 +500,11 @@ app.whenReady().then(async () => {
   ipcMain.handle("billing:state", async () => {
     if (!authSession) return { signedIn: false, balanceUsd: null, unlimited: false };
     const stored = loadStoredSession();
-    const balance = await pevo.balance(authSession.accessToken, stored?.baseUrl === pevo.baseUrl ? stored.dashboardToken : undefined);
+    const balance = await newapi.balance(authSession.accessToken, stored?.baseUrl === newapi.baseUrl ? stored.dashboardToken : undefined);
     return { signedIn: true, balanceUsd: balance.usd, unlimited: balance.unlimited };
   });
   ipcMain.handle("billing:topup", async () => {
+    if (!topupUrl) throw new Error("未配置充值页：请在环境变量 NEWAPI_TOPUP_URL 或 NEWAPI_BASE_URL 中设置");
     await shell.openExternal(topupUrl);
     return undefined;
   });
