@@ -151,6 +151,17 @@ describe("pevo new-api client", () => {
     expect(stub!.state.tokenCreations).toBe(1);
   });
 
+  it("honors a custom token name for get-or-create", async () => {
+    stub = createStub({ registerEnabled: true });
+    const base = await listen(stub.server);
+    const client = createPevoClient({ baseUrl: base, tokenName: "custom-key" });
+    const session = await client.login("bob", "pw-bob");
+    await client.getOrCreateToken(session.dashboardToken);
+    expect(stub.state.tokens.some((token) => token.userId === 2 && token.name === "custom-key")).toBe(true);
+    // The default-named token (alice's) is invisible to the custom-named client.
+    expect(stub.state.tokens.filter((token) => token.userId === 2)).toHaveLength(1);
+  });
+
   it("registers a missing account during first login and proceeds", async () => {
     const { client } = await startedClient({ registerEnabled: true });
     const session = await client.login("carol", "pw-carol");

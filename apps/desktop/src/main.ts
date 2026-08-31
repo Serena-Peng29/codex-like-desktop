@@ -121,11 +121,15 @@ class SidecarManager {
 const sidecar = new SidecarManager();
 let mainWindow: BrowserWindow | null = null;
 let projectPath: string | null = null;
+// Every deployment knob lives in the environment (root .env in dev; process
+// env in packaged builds) — no gateway settings are baked into the code. The
+// inline literals below are only dormant last-resort defaults.
+let gatewayModel = "";
+const defaultModel = process.env.PEVO_DEFAULT_MODEL?.trim() || "gpt-5.6-sol";
 // Model the sidecar is pinned to via -c: env wins, else the first model the
 // gateway advertised at login. Empty means "no override" — the gateway default
 // applies (the offline fallback below only feeds the plan-mode shim).
-let gatewayModel = "";
-function effectiveModel(fallback = "gpt-5.6-sol") {
+function effectiveModel(fallback = defaultModel) {
   return process.env.WAY2AGI_MODEL?.trim() || gatewayModel || fallback;
 }
 
@@ -139,6 +143,7 @@ const pevoQuotaPerUnit = Number(process.env.PEVO_QUOTA_PER_UNIT);
 const pevo = createPevoClient({
   baseUrl: pevoBaseUrl,
   fetchImpl: net.fetch as unknown as typeof fetch,
+  ...(process.env.PEVO_TOKEN_NAME?.trim() ? { tokenName: process.env.PEVO_TOKEN_NAME.trim() } : {}),
   ...(Number.isFinite(pevoQuotaPerUnit) && pevoQuotaPerUnit > 0 ? { quotaPerUnit: pevoQuotaPerUnit } : {})
 });
 const topupUrl = process.env.PEVO_TOPUP_URL ?? `${pevoBaseUrl}/console/topup`;

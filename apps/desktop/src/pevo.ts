@@ -19,26 +19,28 @@ export type PevoUser = { id: number; username: string; displayName: string; emai
 export type PevoSession = { baseUrl: string; dashboardToken: string; apiKey: string; user: PevoUser };
 export type PevoBalance = { usd: number | null; unlimited: boolean };
 
-// tokenName is the dedicated relay key this client manages for the desktop; a
-// missing key is created on first login, an existing one is reused untouched.
-const tokenName = "way2agi-desktop";
 // TokenStatusEnabled in new-api; disabled/expired keys are not reused.
 const tokenStatusEnabled = 1;
 // Gateway quota is an integer counter; quotaPerUnit of it equals one US dollar
 // (pevo.ai serves quota_per_unit=500000 and displays USD).
 const defaultQuotaPerUnit = 500_000;
+// Default name of the dedicated relay key this client manages for the desktop;
+// a missing key is created on first login, an existing one is reused untouched.
+const defaultTokenName = "way2agi-desktop";
 
 export type PevoClientOptions = {
   baseUrl: string;
   // Injectable for tests; main.ts passes Electron net.fetch (system-proxy aware).
   fetchImpl?: typeof fetch;
   quotaPerUnit?: number;
+  tokenName?: string;
 };
 
 export function createPevoClient(options: PevoClientOptions) {
   const baseUrl = options.baseUrl.replace(/\/+$/, "");
   const doFetch = options.fetchImpl ?? ((url: string, init?: RequestInit) => fetch(url, init));
   const quotaPerUnit = options.quotaPerUnit ?? defaultQuotaPerUnit;
+  const tokenName = options.tokenName?.trim() || defaultTokenName;
 
   // Tolerant envelope unwrap: dashboard endpoints answer {success,message,data},
   // the usage endpoint answers {code,message,data}, relay endpoints speak plain
