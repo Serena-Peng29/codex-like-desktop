@@ -1,1 +1,1 @@
-{"extends":"../../tsconfig.base.json","compilerOptions":{"rootDir":"src","outDir":"dist","lib":["ES2022","DOM"],"types":["node","react","react-dom"],"jsx":"react-jsx"},"include":["src/main.ts","src/preload.cts","src/types.d.ts"]}
+{"extends":"../../tsconfig.base.json","compilerOptions":{"rootDir":"src","outDir":"dist","lib":["ES2022","DOM"],"types":["node","react","react-dom"],"jsx":"react-jsx"},"include":["src/main.ts","src/pevo.ts","src/pevo.test.ts","src/preload.cts","src/types.d.ts"]}

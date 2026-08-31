@@ -1,12 +1,13 @@
-import { app, BrowserWindow, dialog, ipcMain, safeStorage, shell } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, net, safeStorage, shell } from "electron";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { buildTurnInputItems, type TurnInput } from "./turn-input.js";
+import { createPevoClient, type PevoSession } from "./pevo.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -85,7 +86,7 @@ class SidecarManager {
         "-c", 'model_providers.way2agi.env_key="WAY2AGI_TOKEN"',
         "-c", "disable_response_storage=true"
       );
-      const model = process.env.WAY2AGI_MODEL?.trim();
+      const model = effectiveModel("");
       if (model && !model.includes('"')) sidecarArgs.push("-c", `model="${model}"`);
       sidecarEnv = { ...process.env, CODEX_HOME: codexHome, WAY2AGI_TOKEN: gatewayToken };
     }
@@ -120,70 +121,78 @@ class SidecarManager {
 const sidecar = new SidecarManager();
 let mainWindow: BrowserWindow | null = null;
 let projectPath: string | null = null;
-let gatewayUrl = "";
-let gatewayIsRemote = false;
-let gatewayServer: import("node:http").Server | null = null;
-const gatewayModel = process.env.MODEL ?? "gpt-4o-mini";
+// Model the sidecar is pinned to via -c: env wins, else the first model the
+// gateway advertised at login. Empty means "no override" — the gateway default
+// applies (the offline fallback below only feeds the plan-mode shim).
+let gatewayModel = "";
+function effectiveModel(fallback = "gpt-5.6-sol") {
+  return process.env.WAY2AGI_MODEL?.trim() || gatewayModel || fallback;
+}
 
-// Login state (docs/gateway-auth.md P1-2). The desktop talks to services/api,
-// keeps only the refresh token — encrypted via safeStorage, never plaintext —
-// and hands the short-lived access token to the sidecar through the env var
-// named by the provider's env_key. Provider credentials never reach this
-// process.
+// The deployed new-api gateway (pevo.ai) is the whole backend for this phase:
+// account login, per-user relay key, balance and top-up. net.fetch follows the
+// system proxy, which plain Node fetch does not. The user's relay key is the
+// only long-lived credential; it is stored encrypted via safeStorage and handed
+// to the sidecar through the env var named by the provider's env_key.
+const pevoBaseUrl = (process.env.PEVO_BASE_URL ?? "https://pevo.ai").replace(/\/+$/, "");
+const pevoQuotaPerUnit = Number(process.env.PEVO_QUOTA_PER_UNIT);
+const pevo = createPevoClient({
+  baseUrl: pevoBaseUrl,
+  fetchImpl: net.fetch as unknown as typeof fetch,
+  ...(Number.isFinite(pevoQuotaPerUnit) && pevoQuotaPerUnit > 0 ? { quotaPerUnit: pevoQuotaPerUnit } : {})
+});
+const topupUrl = process.env.PEVO_TOPUP_URL ?? `${pevoBaseUrl}/console/topup`;
+
 type AuthUser = { id: string; account: string; kind: string };
 type AuthSession = { accessToken: string; user: AuthUser; gatewayBaseUrl?: string; models?: string[] };
 let authSession: AuthSession | null = null;
-// True when services/api is in play (env-configured or a stored session
-// exists) but no valid session is held: the renderer must show the login
-// screen before any turn can run.
+// True when the login gate is in play (packaged build, or dev without the
+// WAY2AGI_GATEWAY_URL+WAY2AGI_GATEWAY_TOKEN escape hatch) but no valid session
+// is held: the renderer must show the login screen before any turn can run.
 let authRequired = false;
-const apiBaseUrl = (process.env.API_BASE_URL ?? "http://127.0.0.1:4320").replace(/\/+$/, "");
 const authSessionFile = () => join(app.getPath("userData"), "auth-session.enc");
 
-async function apiRequest(method: "GET" | "POST", path: string, body?: Record<string, unknown>, accessToken?: string): Promise<Record<string, unknown>> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
-    method,
-    headers: { ...(body ? { "content-type": "application/json" } : {}), ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}) },
-    body: body ? JSON.stringify(body) : undefined
-  });
-  const parsed = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok) throw new Error(typeof parsed.error === "string" ? parsed.error : `api_error_${response.status}`);
-  return parsed;
-}
+// Encrypted session blob: the per-user relay key plus the dashboard token it
+// was created with (used for balance reads; the password never persists).
+type StoredSession = { version: 1; baseUrl: string; dashboardToken: string; apiKey: string; user: PevoSession["user"] };
 
-function saveRefreshToken(token: string) {
+function saveStoredSession(session: StoredSession) {
   if (!safeStorage.isEncryptionAvailable()) throw new Error("secure_storage_unavailable");
-  writeFileSync(authSessionFile(), safeStorage.encryptString(token));
+  writeFileSync(authSessionFile(), safeStorage.encryptString(JSON.stringify(session)));
 }
-function loadRefreshToken(): string | null {
-  try { return safeStorage.decryptString(readFileSync(authSessionFile())); } catch { return null; }
+function loadStoredSession(): StoredSession | null {
+  try {
+    const parsed = JSON.parse(safeStorage.decryptString(readFileSync(authSessionFile()))) as Partial<StoredSession> | null;
+    return parsed?.version === 1 && typeof parsed.apiKey === "string" && parsed.user ? parsed as StoredSession : null;
+  } catch { return null; } // first launch, or a pre-pevo refresh-token blob
 }
-function clearRefreshToken() { try { rmSync(authSessionFile()); } catch { /* already gone */ } }
+function clearStoredSession() { try { rmSync(authSessionFile()); } catch { /* already gone */ } }
 
-async function establishSession(accessToken: string, refreshToken: string, user: AuthUser): Promise<AuthSession> {
-  const bootstrap = await apiRequest("GET", "/client/bootstrap", undefined, accessToken).catch(() => null);
+function adoptSession(stored: StoredSession, models: string[]): AuthSession {
+  gatewayModel = process.env.WAY2AGI_MODEL?.trim() || models[0] || "";
   const session: AuthSession = {
-    accessToken,
-    user,
-    ...(typeof bootstrap?.gatewayBaseUrl === "string" ? { gatewayBaseUrl: bootstrap.gatewayBaseUrl } : {}),
-    ...(Array.isArray(bootstrap?.models) ? { models: bootstrap.models.filter((id): id is string => typeof id === "string") } : {})
+    accessToken: stored.apiKey,
+    user: { id: String(stored.user.id), account: stored.user.displayName || stored.user.username, kind: "pevo" },
+    gatewayBaseUrl: `${stored.baseUrl}/v1`,
+    ...(models.length ? { models } : {})
   };
-  saveRefreshToken(refreshToken);
+  authSession = session;
   return session;
 }
 
 async function tryRestoreSession(): Promise<boolean> {
-  const stored = loadRefreshToken();
+  const stored = loadStoredSession();
   if (!stored) return false;
-  try {
-    const refreshed = await apiRequest("POST", "/auth/refresh", { refreshToken: stored }) as { accessToken?: string; refreshToken?: string; user?: AuthUser };
-    if (typeof refreshed.accessToken !== "string" || typeof refreshed.refreshToken !== "string" || !refreshed.user) throw new Error("invalid_refresh_response");
-    authSession = await establishSession(refreshed.accessToken, refreshed.refreshToken, refreshed.user);
-    return true;
-  } catch {
-    clearRefreshToken();
+  // Explicit auth failure invalidates the stored key; an unreachable gateway
+  // (null) keeps the session so an offline start still shows history.
+  if (await pevo.isKeyValid(stored.apiKey) === false) {
+    clearStoredSession();
     return false;
   }
+  const client = stored.baseUrl === pevo.baseUrl ? pevo : createPevoClient({ baseUrl: stored.baseUrl, fetchImpl: net.fetch as unknown as typeof fetch });
+  const models = await client.listModels(stored.apiKey).catch(() => [] as string[]);
+  adoptSession(stored, models);
+  return true;
 }
 const approvals = new Map<string, { command: string; cwd: string }>();
 const zhCollator = new Intl.Collator(["zh", "en"], { sensitivity: "base", numeric: true });
@@ -344,22 +353,6 @@ function imagePreview(file: string) {
   try { return `data:${mime};base64,${readFileSync(file).toString("base64")}`; } catch { return undefined; }
 }
 
-async function streamGateway(input: string) {
-  const headers: Record<string, string> = { "content-type": "application/json" };
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (gatewayIsRemote && apiKey) headers.authorization = `Bearer ${apiKey}`;
-  if (gatewayIsRemote && !apiKey) throw new Error("OPENAI_API_KEY is required for MODEL_GATEWAY_BASE_URL");
-  const endpoint = gatewayIsRemote ? `${gatewayUrl}/responses` : `${gatewayUrl}/v1/responses`;
-  const body = gatewayIsRemote ? { model: gatewayModel, input, stream: true } : { input, userId: "test-user", model: gatewayModel };
-  const response = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(body) });
-  if (!response.ok) throw new Error((await response.text()) || `gateway_${response.status}`);
-  const reader = response.body?.getReader();
-  if (!reader) throw new Error("gateway_stream_unavailable");
-  const decoder = new TextDecoder(); let buffer = ""; let output = ""; let usage: Record<string, number> = {};
-  while (true) { const chunk = await reader.read(); if (chunk.done) break; buffer += decoder.decode(chunk.value, { stream: true }); const events = buffer.split("\n\n"); buffer = events.pop() ?? ""; for (const event of events) { const line = event.split("\n").find((entry) => entry.startsWith("data: ")); if (!line) continue; const data = line.slice(6); if (data === "[DONE]") continue; let payload: { type?: string; delta?: string; usage?: Record<string, number> }; try { payload = JSON.parse(data) as typeof payload; } catch { continue; } if (payload.delta) output += payload.delta; if (payload.usage) usage = payload.usage; } }
-  return { output, usage };
-}
-
 function createWindow() {
   const window = new BrowserWindow({ width: 1180, height: 780, minWidth: 900, minHeight: 620, frame: false, backgroundColor: "#111110", webPreferences: { preload: join(__dirname, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   mainWindow = window;
@@ -391,7 +384,7 @@ async function runAppServerTurn(input: TurnInput[], options?: { effort?: string;
     try {
       return await new Promise<{ output: string; usage: Record<string, number> }>((resolvePromise, reject) => {
         activeTurn = { threadId: activeThreadId!, output: "", usage: {}, resolve: resolvePromise, reject };
-        void sidecar.request("turn/start", { threadId: activeThreadId, ...(cwd ? { cwd, sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd] } } : {}), approvalPolicy: "on-request", effort: options?.effort ?? "medium", ...(options?.planMode ? { collaborationMode: { mode: "plan", settings: { model: gatewayModel, reasoning_effort: "medium", developer_instructions: null } } } : {}), input: buildTurnInputItems(input) }).then((result) => {
+        void sidecar.request("turn/start", { threadId: activeThreadId, ...(cwd ? { cwd, sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd] } } : {}), approvalPolicy: "on-request", effort: options?.effort ?? "medium", ...(options?.planMode ? { collaborationMode: { mode: "plan", settings: { model: effectiveModel(), reasoning_effort: "medium", developer_instructions: null } } } : {}), input: buildTurnInputItems(input) }).then((result) => {
           const turn = (result as { turn?: { id?: string } } | null)?.turn;
           if (activeTurn && turn?.id) {
             activeTurn.turnId = turn.id;
@@ -437,27 +430,15 @@ async function startSidecar() {
 
 app.whenReady().then(async () => {
   loadClientState();
-  // Login is in play when services/api is configured (always true for a
-  // packaged build — the product has no offline demo mode) or a stored
-  // session exists; otherwise the Phase 0 demo flow keeps working in dev.
-  let apiConfigured = false;
-  try { apiConfigured = app.isPackaged || Boolean(process.env.API_BASE_URL) || Boolean(loadRefreshToken()); } catch { apiConfigured = app.isPackaged; }
-  if (apiConfigured) authRequired = !(await tryRestoreSession());
-  const configuredGateway = process.env.MODEL_GATEWAY_BASE_URL?.replace(/\/+$/, "");
-  if (configuredGateway) { gatewayUrl = configuredGateway; gatewayIsRemote = true; }
-  else if (!app.isPackaged) {
-    // The embedded mock gateway is a dev artifact; packaged builds talk to the
-    // deployed backend only and ship without services/ on disk.
-    try {
-      const { createGatewayServer } = await import(pathToFileURL(join(projectRoot, "services/model-gateway/dist/server.js")).href) as { createGatewayServer: () => import("node:http").Server };
-      gatewayServer = createGatewayServer();
-      await new Promise<void>((resolvePromise) => gatewayServer!.listen(0, "127.0.0.1", () => resolvePromise()));
-      const address = gatewayServer.address(); if (address && typeof address !== "string") gatewayUrl = `http://127.0.0.1:${address.port}`;
-    } catch { /* dev workspace without built services: gateway-less demo */ }
-  }
-  // With login pending there is no token to inject; the renderer shows the
+  // The login gate is in play for packaged builds (the product has no offline
+  // demo mode) and for dev runs that do not provide the WAY2AGI gateway env
+  // escape hatch; a stored session restores past it.
+  const envGatewayOverride = Boolean(process.env.WAY2AGI_GATEWAY_URL?.trim() && process.env.WAY2AGI_GATEWAY_TOKEN?.trim());
+  const loginInPlay = app.isPackaged || !envGatewayOverride;
+  if (loginInPlay) authRequired = !(await tryRestoreSession());
+  // With login pending there is no key to inject; the renderer shows the
   // login screen and the sidecar starts once a session is established.
-  if (!apiConfigured || authSession) await startSidecar();
+  if (!loginInPlay || authSession) await startSidecar();
   sidecar.setRequestHandler((request) => {
     const payload = { requestId: request.id, method: request.method, params: request.params ?? {} };
     // Every server-initiated request that can only proceed with a user answer
@@ -486,48 +467,41 @@ app.whenReady().then(async () => {
   ipcMain.handle("window:minimize", () => BrowserWindow.getFocusedWindow()?.minimize());
   ipcMain.handle("window:toggle-maximize", () => { const target = BrowserWindow.getFocusedWindow(); if (!target) return false; if (target.isMaximized()) target.unmaximize(); else target.maximize(); return target.isMaximized(); });
   ipcMain.handle("window:close", () => BrowserWindow.getFocusedWindow()?.close());
-  ipcMain.handle("auth:request-code", async (_event, account: unknown) => {
-    if (typeof account !== "string" || !account.trim()) throw new Error("invalid_account");
-    return apiRequest("POST", "/auth/request-code", { account: account.trim() });
-  });
-  ipcMain.handle("auth:login", async (_event, account: unknown, code: unknown) => {
-    if (typeof account !== "string" || typeof code !== "string" || !account.trim() || !code.trim()) throw new Error("invalid_login_input");
-    const result = await apiRequest("POST", "/auth/login", { account: account.trim(), code: code.trim() }) as { accessToken?: string; refreshToken?: string; user?: AuthUser };
-    if (typeof result.accessToken !== "string" || typeof result.refreshToken !== "string" || !result.user) throw new Error("invalid_login_response");
-    authSession = await establishSession(result.accessToken, result.refreshToken, result.user);
+  ipcMain.handle("auth:login", async (_event, account: unknown, password: unknown) => {
+    if (typeof account !== "string" || typeof password !== "string" || !account.trim() || !password) throw new Error("invalid_login_input");
+    // Login (auto-registering a first-time account), then provision the user's
+    // own relay key — the gateway account password is used here exactly once
+    // and never stored anywhere.
+    const pevoSession = await pevo.login(account, password);
+    const apiKey = await pevo.getOrCreateToken(pevoSession.dashboardToken);
+    const models = await pevo.listModels(apiKey).catch(() => [] as string[]);
+    const stored: StoredSession = { version: 1, baseUrl: pevoSession.baseUrl, dashboardToken: pevoSession.dashboardToken, apiKey, user: pevoSession.user };
+    saveStoredSession(stored);
+    const session = adoptSession(stored, models);
     authRequired = false;
     await startSidecar();
-    return { user: authSession.user, gatewayBaseUrl: authSession.gatewayBaseUrl ?? null, models: authSession.models ?? [] };
+    return { user: session.user, models: session.models ?? [] };
   });
   ipcMain.handle("auth:logout", async () => {
-    clearRefreshToken();
+    clearStoredSession();
     authSession = null;
+    gatewayModel = "";
     authRequired = true;
     await sidecar.stop();
   });
   ipcMain.handle("billing:state", async () => {
-    if (!authSession) return { signedIn: false, totalCredits: null };
-    try {
-      const balance = await apiRequest("GET", "/billing/balance", undefined, authSession.accessToken) as Record<string, unknown>;
-      return { signedIn: true, totalCredits: Number(balance.totalCredits ?? 0) };
-    } catch { return { signedIn: true, totalCredits: null }; }
+    if (!authSession) return { signedIn: false, balanceUsd: null, unlimited: false };
+    const stored = loadStoredSession();
+    const balance = await pevo.balance(authSession.accessToken, stored?.baseUrl === pevo.baseUrl ? stored.dashboardToken : undefined);
+    return { signedIn: true, balanceUsd: balance.usd, unlimited: balance.unlimited };
   });
-  ipcMain.handle("billing:create-order", async (_event, credits: unknown, channel: unknown) => {
-    if (!authSession) throw new Error("not_signed_in");
-    if (!Number.isInteger(credits) || (channel !== "wechat" && channel !== "alipay")) throw new Error("invalid_order_input");
-    return apiRequest("POST", "/billing/orders", { credits, channel }, authSession.accessToken);
-  });
-  ipcMain.handle("billing:get-order", async (_event, orderId: unknown) => {
-    if (!authSession || typeof orderId !== "string" || !orderId) throw new Error("invalid_order_query");
-    return apiRequest("GET", `/billing/orders/${encodeURIComponent(orderId)}`, undefined, authSession.accessToken);
-  });
-  ipcMain.handle("billing:mock-pay", async (_event, orderId: unknown) => {
-    if (!authSession || typeof orderId !== "string" || !orderId) throw new Error("invalid_order_query");
-    return apiRequest("POST", `/billing/orders/${encodeURIComponent(orderId)}/mock-pay`, {}, authSession.accessToken);
+  ipcMain.handle("billing:topup", async () => {
+    await shell.openExternal(topupUrl);
+    return undefined;
   });
   ipcMain.handle("app:state", async () => {
     const history = await listConversationHistory();
-    return { projectPath, activeThreadId, activeTurnThreadId: activeTurn?.threadId ?? null, activeTurnId: activeTurn?.turnId ?? null, unassignedThreadIds: [...unassignedThreadIds], threadProjectPaths: Object.fromEntries(threadProjectPaths), threadDisplayNames: Object.fromEntries(threadDisplayNames), pinnedThreadIds: [...pinnedThreadIds], projectMeta: Object.fromEntries(projectMeta), pinnedProjects: [...pinnedProjects], removedProjects: [...removedProjects], history, sidecar: sidecar.status, gateway: gatewayUrl, gatewayMode: gatewayIsRemote ? "remote" : "local", auth: { required: authRequired, user: authSession?.user ?? null }, models: authSession?.models ?? [] };
+    return { projectPath, activeThreadId, activeTurnThreadId: activeTurn?.threadId ?? null, activeTurnId: activeTurn?.turnId ?? null, unassignedThreadIds: [...unassignedThreadIds], threadProjectPaths: Object.fromEntries(threadProjectPaths), threadDisplayNames: Object.fromEntries(threadDisplayNames), pinnedThreadIds: [...pinnedThreadIds], projectMeta: Object.fromEntries(projectMeta), pinnedProjects: [...pinnedProjects], removedProjects: [...removedProjects], history, sidecar: sidecar.status, auth: { required: authRequired, user: authSession?.user ?? null }, models: authSession?.models ?? [] };
   });
   // Re-adding a previously removed project must lift the removal marker, or the
   // sidebar would keep hiding the group and the next launch would drop it again;
@@ -692,5 +666,5 @@ app.whenReady().then(async () => {
   createWindow();
 });
 
-app.on("before-quit", () => { gatewayServer?.close(); void sidecar.stop(); });
+app.on("before-quit", () => { void sidecar.stop(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
