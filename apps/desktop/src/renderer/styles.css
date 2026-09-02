@@ -1246,6 +1246,40 @@ button:active:not(:disabled) { transform: scale(.98); }
 .recharge-mock { width: 100%; }
 .recharge-done { text-align: center; color: #4ade80; font-size: 14px; padding: 8px 0; }
 
+/* Only the window controls are implemented in this titlebar. Keep the
+   placeholder navigation/menu labels out of the shipped UI until their
+   behavior exists. */
+.app-window { position: relative; }
+.global-menubar {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 30;
+  display: flex;
+  width: auto;
+  height: 2.65rem;
+  min-height: 2.65rem;
+  padding: .25rem .35rem;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+}
+.global-menubar .window-controls,
+.global-menubar .app-menus { display: none; }
+.global-menubar .window-actions {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  margin-left: 0;
+  pointer-events: auto;
+}
+.global-menubar .menu-icon { width: 2.6rem; height: 2.25rem; }
+
+@media (max-width: 44rem) {
+  .global-menubar { height: 2.35rem; min-height: 2.35rem; padding: .15rem .2rem; }
+  .global-menubar .window-actions { display: flex; }
+}
+
 /* Soft-surface pass: separators should support hierarchy, not draw a grid. */
 :root {
   --hairline: rgb(255 255 255 / 8%);
