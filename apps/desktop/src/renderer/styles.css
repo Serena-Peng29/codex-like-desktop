@@ -1002,6 +1002,133 @@ body, .app-window, .app-shell, .workspace, .workspace-body, .conversation-pane {
 .login-primary:hover { background: #15803d; }
 .login-notice { color: #9aa3af; font-size: 12px; line-height: 1.5; }
 
+/* Final interaction polish: keep the existing Codex layout and controls,
+   but give every state the same compact, neutral surface language. */
+:root {
+  --app-bg: #171717;
+  --sidebar-bg: #151515;
+  --surface: #202020;
+  --surface-card: #242424;
+  --surface-bubble: #1b1b1b;
+  --chip: #303030;
+  --badge: #2a2a2a;
+  --fill-strong: #303030;
+  --pill: #1e1e1e;
+  --hairline: #303030;
+  --text: #f2f2f2;
+  --text-secondary: #b5b5b5;
+  --muted: #8d8d8d;
+  --quiet: #5e5e5e;
+  --accent: #f27a4b;
+  --success: #4ac28b;
+  --danger: #ee7676;
+}
+
+button,
+.file-row,
+.project-row,
+.session-row,
+.recent-session,
+.new-chat-button,
+.tiny-action,
+.icon-button,
+.menu-trigger,
+.composer-icon,
+.send-button,
+.message-copy,
+.primary-button,
+.secondary-button {
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease,
+    box-shadow 140ms ease, transform 100ms ease, opacity 140ms ease;
+}
+
+button:active:not(:disabled) { transform: scale(.98); }
+
+.global-menubar { background: var(--sidebar-bg); border-bottom-color: var(--hairline); }
+.global-menubar .menu-icon,
+.app-menus button { color: var(--muted); }
+.global-menubar .menu-icon:hover,
+.app-menus button:hover { color: var(--text); background: var(--badge); }
+.global-menubar .menu-icon:active,
+.app-menus button:active { background: var(--chip); }
+.global-menubar .close-icon:hover { color: #fff; background: var(--danger); }
+
+.sidebar { background: var(--sidebar-bg); border-right-color: var(--hairline); }
+.sidebar-header { border-bottom: 1px solid transparent; }
+.brand-copy strong { color: var(--text); }
+.new-chat-button { border-color: transparent; background: var(--fill-strong); }
+.new-chat-button:hover { background: #3a3a3a; box-shadow: inset 0 0 0 1px #4a4a4a; }
+.new-chat-button:active { background: #414141; }
+.tiny-action:hover,
+.icon-button:hover,
+.settings-button:hover { color: var(--text); background: var(--badge); }
+.tiny-action.is-active,
+.icon-button.is-active,
+.menu-trigger[aria-expanded="true"],
+.composer-icon[aria-expanded="true"] { color: var(--text); background: var(--badge); box-shadow: inset 0 0 0 1px #3b3b3b; }
+.project-row:hover, .session-row:hover, .recent-session:hover { color: var(--text); background: #202020; }
+.active-session, .active-recent { color: var(--text); background: #2a2a2a; box-shadow: inset 2px 0 var(--accent); }
+.active-project { color: var(--text); }
+.session-more:hover, .project-more:hover { color: var(--text); background: var(--chip); }
+
+.topbar { background: var(--app-bg); border-bottom-color: var(--hairline); }
+.topbar-actions .icon-button.is-active { color: var(--text); background: var(--badge); box-shadow: inset 0 0 0 1px #3b3b3b; }
+.tab:hover { color: var(--text); background: var(--badge); }
+.active-tab { color: var(--text); border-bottom-color: var(--accent); }
+
+.welcome-block h1 { color: var(--text); font-weight: 560; }
+.welcome-chips button, .quick-actions button { color: var(--text-secondary); border-color: var(--hairline); background: var(--surface-bubble); }
+.welcome-chips button:hover, .quick-actions button:hover,
+.recent-prompt:hover { color: var(--text); border-color: #444; background: var(--badge); }
+
+.user-message .message-content { background: #252525; border-color: #353535; }
+.assistant-identity { color: var(--text); }
+.message p, .markdown-text { color: var(--text-secondary); }
+.message-copy:hover { color: var(--text); background: var(--badge); }
+.message-tool, .message-reasoning, .file-change-card { background: var(--surface-card); border-color: var(--hairline); }
+.tool-summary:hover, .tool-summary[aria-expanded="true"],
+.reasoning-toggle:hover, .reasoning-toggle[aria-expanded="true"],
+.file-change-summary:not(:disabled):hover, .file-change-summary[aria-expanded="true"] {
+  color: var(--text); background: var(--badge);
+}
+
+.composer { background: var(--surface); border-color: #353535; box-shadow: 0 8px 28px rgb(0 0 0 / 24%); }
+.composer:focus-within { border-color: #555; box-shadow: 0 8px 28px rgb(0 0 0 / 24%), 0 0 0 3px rgb(242 122 75 / 12%); }
+.composer textarea { color: var(--text); }
+.composer textarea::placeholder { color: #707070; }
+.permission-trigger { color: var(--text-secondary); background: var(--chip); }
+.permission-trigger:hover, .model-trigger:hover { color: var(--text); background: #383838; }
+.send-button { color: #171717; background: var(--text-secondary); }
+.send-button:hover:not(:disabled) { color: #171717; background: var(--text); box-shadow: 0 2px 8px rgb(255 255 255 / 14%); }
+.send-button:disabled { color: #707070; background: #303030; }
+.send-button.stop-button { color: var(--text); background: var(--chip); }
+
+.composer-tools-menu, .composer-menu, .sidebar-flyout, .session-menu, .project-menu,
+.workspace-menu { background: var(--surface-card); border-color: #3a3a3a; box-shadow: 0 14px 34px rgb(0 0 0 / 45%); }
+.composer-tools-menu button:hover, .composer-tools-menu .tool-selected,
+.permission-option:hover, .menu-option:hover, .selected-option,
+.workspace-menu button:hover, .session-menu button:hover, .project-menu button:hover { color: var(--text); background: var(--badge); }
+.permission-option.selected-option { box-shadow: inset 2px 0 var(--accent); }
+
+.inspector, .file-editor { background: var(--sidebar-bg); border-color: var(--hairline); }
+.file-row:hover, .file-row.is-selected { color: var(--text); background: var(--badge); }
+.primary-button { background: var(--text-secondary); }
+.primary-button:hover { color: #171717; background: var(--text); }
+.secondary-button { border-color: #3b3b3b; background: var(--chip); }
+.secondary-button:hover { color: var(--text); border-color: #555; background: #393939; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+/* The compact sidebar rule above intentionally wins on desktop; restore the
+   existing mobile layout where the sidebar stacks above the conversation. */
+@media (max-width: 44rem) {
+  .sidebar:not(.is-collapsed) { width: 100%; flex-basis: auto; }
+  .conversation-pane { min-width: 0; }
+  .composer-area { width: 100%; }
+}
+
 /* Settings dialog: account session and the recharge entry (P1-4) open from
    here; nothing account-related sits as permanent sidebar chrome. The card
    and the recharge dialog stacked on top share the login overlay language. */
