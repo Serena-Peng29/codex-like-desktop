@@ -1129,6 +1129,91 @@ button:active:not(:disabled) { transform: scale(.98); }
   .composer-area { width: 100%; }
 }
 
+/* Reference alignment pass: the supplied Codex frame uses a warm charcoal
+   rail, a visible compact menubar, and a narrower centered conversation. */
+:root {
+  --app-bg: #141413;
+  --sidebar-bg: #24231f;
+  --surface: #242424;
+  --surface-card: #262625;
+  --surface-bubble: #1b1b1a;
+  --chip: #373633;
+  --badge: #32312e;
+  --fill-strong: #383733;
+  --pill: #20201e;
+  --hairline: #34332f;
+  --text: #f1f0ed;
+  --text-secondary: #bab8b2;
+  --muted: #92908a;
+  --quiet: #686660;
+  --accent: #f27748;
+}
+
+.global-menubar {
+  position: relative;
+  inset: auto;
+  z-index: 30;
+  display: flex;
+  width: 100%;
+  height: 2.65rem;
+  min-height: 2.65rem;
+  flex: 0 0 2.65rem;
+  padding: 0 .55rem;
+  color: var(--text-secondary);
+  background: var(--sidebar-bg);
+  border-bottom: 1px solid var(--hairline);
+  pointer-events: auto;
+}
+.global-menubar .window-controls,
+.global-menubar .app-menus,
+.global-menubar .window-actions { display: flex; align-items: center; }
+.global-menubar .app-menus { margin-left: .45rem; gap: .1rem; }
+.global-menubar .window-actions { margin-left: auto; }
+.global-menubar .menu-icon { width: 2.25rem; height: 2.15rem; color: var(--muted); }
+.global-menubar .app-menus button { padding: .42rem .62rem; color: var(--text-secondary); font-size: .78rem; }
+
+.sidebar:not(.is-collapsed) {
+  width: clamp(17rem, 18vw, 28rem);
+  flex-basis: clamp(17rem, 18vw, 28rem);
+  background: var(--sidebar-bg);
+}
+.sidebar-header { min-height: 3.7rem; padding-inline: 1rem; }
+.brand-copy strong { font-size: 1.08rem; }
+.brand-badge { color: #aaa79f; background: #302f2c; }
+.new-chat-button { width: calc(100% - 1.2rem); min-height: 2.35rem; margin: .2rem .6rem .65rem; background: #373633; }
+.new-chat-button:hover { background: #41403c; }
+.sidebar-scroll { padding-inline: .6rem; }
+.section-label-with-action { padding-inline: .45rem; }
+.project-row, .session-row, .recent-session { min-height: 2.3rem; }
+.active-session, .active-recent { background: #353431; box-shadow: inset 2px 0 var(--accent); }
+.sidebar-footer { background: #211f1c; }
+
+.topbar { min-height: 3.35rem; padding-inline: 1rem; }
+.conversation-scroll { padding: 1.25rem 1.5rem 8rem; }
+.message-column { width: min(100%, 63rem); }
+.user-message { padding-left: 14%; }
+.assistant-message { padding-right: 0; }
+.composer-area { width: min(100%, 63rem); padding-inline: 0; }
+.composer { border-radius: .8rem; }
+
+@media (max-width: 60rem) {
+  .sidebar:not(.is-collapsed) { width: 17rem; flex-basis: 17rem; }
+  .conversation-scroll { padding-inline: 1rem; }
+  .composer-area { width: min(100%, 63rem); padding-inline: .25rem; }
+}
+
+@media (max-width: 44rem) {
+  .global-menubar { height: 2.35rem; min-height: 2.35rem; flex-basis: 2.35rem; padding-inline: .4rem; }
+  .global-menubar .window-controls { display: flex; }
+  .global-menubar .window-controls .menu-icon:nth-child(n+2),
+  .global-menubar .app-menus button:nth-child(n+2),
+  .global-menubar .window-actions { display: none; }
+  .sidebar:not(.is-collapsed) { width: 100%; flex-basis: auto; }
+  .conversation-scroll { padding: .9rem .75rem 7rem; }
+  .message-column, .composer-area { width: 100%; }
+  .composer-area { padding-inline: .65rem; }
+}
+
 /* Settings dialog: account session and the recharge entry (P1-4) open from
    here; nothing account-related sits as permanent sidebar chrome. The card
    and the recharge dialog stacked on top share the login overlay language. */
