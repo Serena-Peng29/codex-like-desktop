@@ -1280,6 +1280,38 @@ button:active:not(:disabled) { transform: scale(.98); }
   .global-menubar .window-actions { display: flex; }
 }
 
+/* Frameless window edge: controls sit on the outer edge, sharing one quiet
+   border color with the app shell instead of reading as page content. */
+.app-window {
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: .6rem;
+  background: var(--app-bg);
+}
+.global-menubar {
+  top: 0;
+  right: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  -webkit-app-region: drag;
+}
+.global-menubar .window-actions { -webkit-app-region: no-drag; }
+.global-menubar .menu-icon {
+  width: 2.65rem;
+  height: 2.35rem;
+  border-radius: 0;
+  color: var(--muted);
+}
+.global-menubar .window-actions .menu-icon:first-child { border-top-left-radius: .45rem; }
+.global-menubar .window-actions .close-icon { border-top-right-radius: .45rem; }
+.global-menubar .menu-icon:hover { background: rgb(255 255 255 / 8%); }
+.global-menubar .close-icon:hover { color: #fff; background: var(--danger); }
+
+@media (max-width: 44rem) {
+  .app-window { border-radius: .45rem; }
+  .global-menubar .menu-icon { height: 2.2rem; }
+}
+
 /* Soft-surface pass: separators should support hierarchy, not draw a grid. */
 :root {
   --hairline: rgb(255 255 255 / 8%);
