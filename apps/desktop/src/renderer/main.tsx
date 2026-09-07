@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FilePenLine, FileText, Folder, FolderOpen, FolderPlus, Lightbulb, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, PanelRightOpen, Paperclip, Pencil, Pin, PinOff, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FilePenLine, FileText, Folder, FolderOpen, FolderPlus, Lightbulb, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, PanelRightOpen, Paperclip, Pencil, Pin, PinOff, Plus, Puzzle, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, User, Wrench, X } from "lucide-react";
 import { removeUtf8Spans, sliceUtf8ByByteRange } from "../turn-input.js";
 import "./styles.css";
 
@@ -892,9 +892,62 @@ function LoginOverlay({ onLoggedIn }: { onLoggedIn: () => void }) {
   );
 }
 
-// Settings dialog (opened from the sidebar footer): gateway account session,
-// balance, and the top-up shortcut into the gateway's web console. Signing in
-// or out re-reads app state.
+// Skills pane (settings dialog): read-only visualization of the skill folders
+// inside the isolated CODEX_HOME the sidecar runs with. Data comes from the
+// main process `skills:list` handler; nothing here executes skill content.
+function SkillsPane() {
+  const [skills, setSkills] = useState<Array<{ id: string; name: string; description: string; builtin: boolean }> | null>(null);
+  const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    let alive = true;
+    window.desktop.listSkills()
+      .then((list) => { if (alive) setSkills(list); })
+      .catch((err: unknown) => { if (alive) setError(err instanceof Error ? err.message : String(err)); });
+    return () => { alive = false; };
+  }, []);
+  if (error) return <div className="login-notice">读取技能失败：{error}</div>;
+  if (!skills) return <div className="login-notice">正在读取技能…</div>;
+  const keyword = query.trim().toLowerCase();
+  const visible = skills.filter((skill) => !keyword || skill.name.toLowerCase().includes(keyword) || skill.description.toLowerCase().includes(keyword) || skill.id.toLowerCase().includes(keyword));
+  const customCount = skills.filter((skill) => !skill.builtin).length;
+  return (
+    <>
+      <div className="skills-toolbar">
+        <div className="skills-search">
+          <Search size={14} />
+          <input placeholder="搜索技能" value={query} onChange={(event) => setQuery(event.target.value)} />
+        </div>
+        <div className="skills-count">{visible.length} / {skills.length} 项 · 自定义 {customCount} · 内置 {skills.length - customCount}</div>
+      </div>
+      {visible.length === 0 ? <div className="skills-empty">没有匹配的技能。把技能文件夹放到应用数据目录的 <code>codex-home/skills</code> 下（每个技能含 <code>SKILL.md</code>）即可在这里看到。</div> : (
+        <div className="skill-grid">
+          {visible.map((skill) => {
+            let hash = 0;
+            for (const char of skill.id) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+            const hue = hash % 360;
+            return (
+              <div className="skill-card" key={skill.id} title={skill.id}>
+                <div className="skill-card-head">
+                  <span className="skill-icon" style={{ background: `hsl(${hue} 40% 16%)`, color: `hsl(${hue} 70% 62%)`, borderColor: `hsl(${hue} 40% 30%)` }} aria-hidden="true">{skill.name.slice(0, 1).toUpperCase()}</span>
+                  <strong>{skill.name}</strong>
+                  <span className="skill-tag">{skill.builtin ? "内置" : "自定义"}</span>
+                </div>
+                {skill.description && <p className="skill-desc">{skill.description}</p>}
+                <div className="skill-path">{skill.id}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
+// Settings dialog (opened from the sidebar footer): a large dialog with a
+// sidebar — 账号 holds the gateway account session, balance, and the top-up
+// shortcut into the gateway's web console; 技能 visualizes the sidecar's
+// CODEX_HOME skills. Signing in or out re-reads app state.
 function SettingsModal({ user, authRequired, billing, onClose, onSessionChanged }: {
   user: { id: string; account: string; kind: string } | null;
   authRequired: boolean;
@@ -902,6 +955,7 @@ function SettingsModal({ user, authRequired, billing, onClose, onSessionChanged 
   onClose: () => void;
   onSessionChanged: () => void;
 }) {
+  const [section, setSection] = useState<"account" | "skills">("account");
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
   const [notice, setNotice] = useState("");
@@ -928,26 +982,41 @@ function SettingsModal({ user, authRequired, billing, onClose, onSessionChanged 
   return (
     <div className="settings-overlay" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }} tabIndex={-1} ref={(element) => element?.focus()}>
       <div className="settings-card" role="dialog" aria-modal="true" aria-label="设置">
-        <div className="recharge-head"><strong>设置</strong><button className="recharge-close" onClick={onClose} aria-label="关闭">×</button></div>
-        <div className="settings-section">
-          <div className="recharge-label">账号</div>
-          {user ? <>
-            <div className="settings-account">
-              <span className="settings-avatar" aria-hidden="true">{user.account.slice(0, 1).toUpperCase()}</span>
-              <div className="settings-account-copy"><strong>{user.account}</strong><small>{user.kind === "gateway" ? "网关账号" : user.kind}</small></div>
-            </div>
-            <div className="settings-balance"><span>当前余额</span><strong>{billing?.signedIn ? billing.unlimited ? "不限量" : billing.balanceUsd != null ? `$${billing.balanceUsd.toFixed(2)}` : "—" : "获取中…"}</strong></div>
-            <div className="settings-actions">
-              <button className="login-primary" onClick={() => void window.desktop.openTopup()}>充值</button>
-              <button className="login-secondary" onClick={() => void logout()} disabled={busy}>退出登录</button>
-            </div>
-          </> : authRequired ? <>
-            <input className="login-input" placeholder="用户名或邮箱" value={account} autoComplete="username" onChange={(event) => setAccount(event.target.value)} />
-            <input className="login-input" placeholder="密码" type="password" value={password} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void login(); }} />
-            <button className="login-primary" onClick={() => void login()} disabled={busy}>{busy ? "登录中…" : "登录"}</button>
-          </> : <div className="login-notice">当前为本地开发模式，未启用账号登录。</div>}
+        <div className="settings-nav">
+          <div className="settings-nav-head">设置</div>
+          <button className={`settings-nav-item${section === "account" ? " is-active" : ""}`} onClick={() => setSection("account")}><User size={15} /> 账号</button>
+          <button className={`settings-nav-item${section === "skills" ? " is-active" : ""}`} onClick={() => setSection("skills")}><Puzzle size={15} /> 技能</button>
         </div>
-        {notice && <div className="login-notice">{notice}</div>}
+        <div className="settings-body">
+          <div className="settings-head">
+            <strong>{section === "account" ? "账号" : "技能"}</strong>
+            <button className="recharge-close" onClick={onClose} aria-label="关闭">×</button>
+          </div>
+          <div className="settings-pane">
+            {section === "skills" ? <SkillsPane /> : (
+              <div className="settings-narrow">
+                <div className="settings-section">
+                  {user ? <>
+                    <div className="settings-account">
+                      <span className="settings-avatar" aria-hidden="true">{user.account.slice(0, 1).toUpperCase()}</span>
+                      <div className="settings-account-copy"><strong>{user.account}</strong><small>{user.kind === "gateway" ? "网关账号" : user.kind}</small></div>
+                    </div>
+                    <div className="settings-balance"><span>当前余额</span><strong>{billing?.signedIn ? billing.unlimited ? "不限量" : billing.balanceUsd != null ? `$${billing.balanceUsd.toFixed(2)}` : "—" : "获取中…"}</strong></div>
+                    <div className="settings-actions">
+                      <button className="login-primary" onClick={() => void window.desktop.openTopup()}>充值</button>
+                      <button className="login-secondary" onClick={() => void logout()} disabled={busy}>退出登录</button>
+                    </div>
+                  </> : authRequired ? <>
+                    <input className="login-input" placeholder="用户名或邮箱" value={account} autoComplete="username" onChange={(event) => setAccount(event.target.value)} />
+                    <input className="login-input" placeholder="密码" type="password" value={password} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void login(); }} />
+                    <button className="login-primary" onClick={() => void login()} disabled={busy}>{busy ? "登录中…" : "登录"}</button>
+                  </> : <div className="login-notice">当前为本地开发模式，未启用账号登录。</div>}
+                </div>
+                {notice && <div className="login-notice">{notice}</div>}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

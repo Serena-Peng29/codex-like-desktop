@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
-import { delimiter, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, delimiter, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildTurnInputItems, type TurnInput } from "./turn-input.js";
 import { createNewApiClient, type NewApiSession } from "./newapi.js";
@@ -527,6 +527,39 @@ app.whenReady().then(async () => {
       .sort((a, b) => a.kind === b.kind ? zhCollator.compare(a.name, b.name) : a.kind === "dir" ? -1 : 1)
       .slice(0, 2000);
     return { path: resolved, entries };
+  });
+  // Skills live inside the isolated CODEX_HOME the sidecar runs with. The
+  // settings dialog only visualizes their manifests (name/description); it
+  // never executes skill content and this handler touches nothing outside
+  // the skill directories.
+  ipcMain.handle("skills:list", () => {
+    const skillsRoot = join(app.getPath("userData"), "codex-home", "skills");
+    if (!existsSync(skillsRoot) || !statSync(skillsRoot).isDirectory()) return [];
+    const skills: Array<{ id: string; name: string; description: string; builtin: boolean }> = [];
+    const readSkill = (dir: string, builtin: boolean) => {
+      const manifest = join(dir, "SKILL.md");
+      if (!existsSync(manifest) || !statSync(manifest).isFile()) return;
+      const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---/.exec(readFileSync(manifest, "utf8"));
+      if (!frontmatter) return;
+      const field = (key: string) => {
+        const line = new RegExp(`^${key}:[ \\t]*(.+)$`, "m").exec(frontmatter[1]);
+        if (!line) return "";
+        return line[1].trim().replace(/^"([\s\S]*)"$/, "$1").replace(/^'([\s\S]*)'$/, "$1").trim();
+      };
+      skills.push({ id: relative(skillsRoot, dir).replace(/\\/g, "/"), name: field("name") || basename(dir), description: field("description"), builtin });
+    };
+    for (const entry of readdirSync(skillsRoot, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!entry.isDirectory()) continue;
+      if (entry.name === ".system") {
+        for (const sub of readdirSync(join(skillsRoot, entry.name), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+          if (sub.isDirectory()) readSkill(join(skillsRoot, entry.name, sub.name), true);
+        }
+        continue;
+      }
+      if (entry.name.startsWith(".")) continue;
+      readSkill(join(skillsRoot, entry.name), false);
+    }
+    return skills;
   });
   ipcMain.handle("fs:read", (_event, filePath: string) => {
     if (typeof filePath !== "string" || !filePath.trim()) throw new Error("invalid_path");

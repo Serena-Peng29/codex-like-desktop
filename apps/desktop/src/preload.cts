@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld("desktop", {
   chooseFolders: () => ipcRenderer.invoke("project:choose-folders"),
   revealProject: (path: string) => ipcRenderer.invoke("project:reveal", path),
   listDirectory: (path: string) => ipcRenderer.invoke("fs:list", path),
+  listSkills: () => ipcRenderer.invoke("skills:list"),
   readFile: (path: string) => ipcRenderer.invoke("fs:read", path),
   imagePreview: (path: string) => ipcRenderer.invoke("image:preview", path),
   setProjectMeta: (path: string, meta: { name?: string; folders?: string[] }) => ipcRenderer.invoke("project:set-meta", path, meta),
