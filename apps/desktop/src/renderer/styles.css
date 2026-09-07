@@ -1249,7 +1249,7 @@ button:active:not(:disabled) { transform: scale(.98); }
 .settings-balance span { color: #9aa3af; font-size: 12px; }
 .settings-balance strong { color: #4ade80; font-size: 14px; }
 .settings-actions { display: flex; gap: 8px; }
-.settings-actions .login-primary, .settings-actions .login-secondary { flex: 1; }
+.settings-actions .login-primary, .settings-actions .login-secondary { flex: 1; margin-top: 0; }
 .skills-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .skills-search { display: flex; align-items: center; gap: 8px; width: 240px; height: 36px; padding: 0 12px; border-radius: 10px; border: 1px solid rgb(255 255 255 / 10%); background: #101214; color: #9aa3af; }
 .skills-search input { flex: 1; min-width: 0; border: none; background: transparent; color: inherit; font-size: 13px; outline: none; }
