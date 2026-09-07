@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, FilePenLine, FileText, Folder, FolderOpen, FolderPlus, Lightbulb, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, PanelRightOpen, Paperclip, Pencil, Pin, PinOff, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FilePenLine, FileText, Folder, FolderOpen, FolderPlus, Lightbulb, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, PanelRightOpen, Paperclip, Pencil, Pin, PinOff, Plus, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, Wrench, X } from "lucide-react";
 import { removeUtf8Spans, sliceUtf8ByByteRange } from "../turn-input.js";
 import "./styles.css";
 
@@ -854,6 +854,7 @@ function AssistantParts({ message }: { message: ChatMessage }) {
 function LoginOverlay({ onLoggedIn }: { onLoggedIn: () => void }) {
   const [account, setAccount] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   async function login() {
@@ -869,12 +870,24 @@ function LoginOverlay({ onLoggedIn }: { onLoggedIn: () => void }) {
   return (
     <div className="login-overlay">
       <div className="login-card">
-        <div className="login-brand"><strong>Codex Harness</strong><span>登录后开始使用</span></div>
-        <input className="login-input" placeholder="用户名或邮箱" value={account} autoComplete="username" onChange={(event) => setAccount(event.target.value)} />
-        <input className="login-input" placeholder="密码" type="password" value={password} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void login(); }} />
-        <button className="login-primary" onClick={() => void login()} disabled={busy}>{busy ? "登录中…" : "登录"}</button>
+        <div className="login-logo" aria-hidden="true">C</div>
+        <h1 className="login-title">登录</h1>
+        <p className="login-subtitle">登录后开始使用 Codex Harness</p>
+        <form className="login-form" onSubmit={(event) => { event.preventDefault(); void login(); }}>
+          <label className="login-label" htmlFor="login-account">用户名或邮箱</label>
+          <input id="login-account" className="login-input" placeholder="you@example.com" value={account} autoComplete="username" onChange={(event) => setAccount(event.target.value)} />
+          <label className="login-label" htmlFor="login-password">密码</label>
+          <div className="login-password">
+            <input id="login-password" className="login-input" placeholder="输入密码" type={showPassword ? "text" : "password"} value={password} autoComplete="current-password" onChange={(event) => setPassword(event.target.value)} />
+            <button className="login-eye" type="button" onClick={() => setShowPassword((visible) => !visible)} aria-label={showPassword ? "隐藏密码" : "显示密码"} aria-pressed={showPassword}>
+              {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+            </button>
+          </div>
+          <button className="login-primary" type="submit" disabled={busy}>{busy ? "登录中…" : "登录"}</button>
+        </form>
         {notice && <div className="login-notice">{notice}</div>}
       </div>
+      <p className="login-signup">没有账号？<strong>首次登录将自动注册</strong></p>
     </div>
   );
 }
