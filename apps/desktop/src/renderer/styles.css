@@ -1228,8 +1228,8 @@ button:active:not(:disabled) { transform: scale(.98); }
    here; nothing account-related sits as permanent sidebar chrome. The card
    and the recharge dialog stacked on top share the login overlay language. */
 .settings-overlay { position: fixed; inset: 0; z-index: 70; display: flex; align-items: center; justify-content: center; background: rgb(8 9 12 / 84%); backdrop-filter: blur(6px); }
-.settings-card { width: min(880px, 94vw); height: min(620px, 88vh); display: flex; flex-direction: row; padding: 0; border-radius: 20px; background: #1b1d21; border: 1px solid rgb(255 255 255 / 6%); box-shadow: 0 24px 64px rgb(0 0 0 / 45%); outline: none; overflow: hidden; }
-.settings-nav { flex: 0 0 190px; display: flex; flex-direction: column; gap: 4px; padding: 20px 12px; border-right: 1px solid rgb(255 255 255 / 6%); background: #17181c; }
+.settings-card { width: min(880px, 94vw); height: min(620px, 88vh); display: flex; flex-direction: row; padding: 0; border-radius: 20px; background: var(--sidebar-bg); border: 1px solid rgb(255 255 255 / 6%); box-shadow: 0 24px 64px rgb(0 0 0 / 45%); outline: none; overflow: hidden; }
+.settings-nav { flex: 0 0 190px; display: flex; flex-direction: column; gap: 4px; padding: 20px 12px; border-right: 1px solid rgb(255 255 255 / 6%); background: var(--sidebar-bg); }
 .settings-nav-head { padding: 0 10px 12px; font-size: 15px; font-weight: 600; }
 .settings-nav-item { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border: none; border-radius: 9px; background: transparent; color: #9aa3af; font-size: 13.5px; cursor: pointer; text-align: left; }
 .settings-nav-item:hover { background: rgb(255 255 255 / 5%); color: inherit; }
@@ -1334,7 +1334,7 @@ button:active:not(:disabled) { transform: scale(.98); }
   align-items: center;
   padding: 0;
   border-bottom: 1px solid var(--hairline);
-  background: #1b1b1b;
+  background: var(--sidebar-bg);
   pointer-events: auto;
   -webkit-app-region: drag;
 }
