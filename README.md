@@ -45,7 +45,7 @@ flowchart LR
 
 - Node.js 18+（Windows / macOS 均可）
 - 一个已部署的 new-api 网关（其他 OpenAI 兼容网关需兼容上述登录 / 令牌 / Responses 接口）
-- Codex 二进制：检出上游源码到固定 commit `25a6e31` 放到 `vendor/codex/codex-rs` 后执行 `npm run build:sidecar`（需 Rust 工具链，产物输出到 `apps/desktop/resources/`）；或用 `CODEX_SIDECAR_PATH` 指向已有的 codex 二进制
+- Codex 二进制：安装 Rust 工具链后运行 `npm run sync:codex` 和 `npm run build:sidecar`（产物输出到 `apps/desktop/resources/`）；或用 `CODEX_SIDECAR_PATH` 指向已有的 codex 二进制
 
 ### 配置并启动（单进程）
 
@@ -53,10 +53,14 @@ flowchart LR
 git clone <本仓库>
 cd codex-like-desktop
 npm install
+npm run sync:codex     # 拉取 openai/codex 并检出固定 commit 25a6e31
+npm run build:sidecar  # 需要 Rust/cargo；已有二进制时可改用 CODEX_SIDECAR_PATH
 npm run typecheck       # 编译全部 TS 包 + renderer
 copy .env.example .env  # 填入你的网关配置
 npm run dev
 ```
+
+`sync:codex` 首次运行会创建 `vendor/codex`，后续运行会校验并切回固定 commit。为避免覆盖工作，若该目录存在本地改动，脚本会停止并提示先提交、暂存或移走改动。需要代理访问 GitHub 时，先在当前终端设置 `HTTPS_PROXY`（例如 PowerShell：`$env:HTTPS_PROXY="http://127.0.0.1:7897"`）。
 
 `.env` 关键配置（全部走环境变量，仓库内不含任何真实网关地址）：
 
@@ -88,6 +92,7 @@ npm run dist:win   # build:all + electron-builder 打 Windows 安装包
 | `npm run startup-check` | 构建产物 + mock sidecar 握手 + 启动检查 |
 | `npm run protocol-schema-check` | 校验固定上游 schema 仍包含所需方法 |
 | `npm run protocol-smoke` | 存在真实 sidecar 时验证 initialize / 流式协议 |
+| `npm run sync:codex` | 拉取上游 Codex 源码并检出固定 commit `25a6e31` |
 | `npm run build:sidecar` | 构建上游 `25a6e31` 的 codex 二进制（需 cargo） |
 
 ## 项目状态与已知限制
