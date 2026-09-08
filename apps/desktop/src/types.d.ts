@@ -1,4 +1,5 @@
-export {};
+import type { ChatStreamOptions } from "./models.js";
+
 declare global {
   interface Window {
     desktop: {
@@ -46,7 +47,7 @@ declare global {
       setThreadName(threadId: string, name: string): Promise<Record<string, string>>;
       toggleThreadPin(threadId: string): Promise<string[]>;
       setThreadProject(threadId: string, projectPath: string | null): Promise<void>;
-      stream(input: Array<{ type: "text"; text: string } | { type: "localImage"; path: string } | { type: "mention"; name: string; path: string }>, options?: { effort?: string; planMode?: boolean }): Promise<{ output: string; usage: Record<string, number> }>;
+      stream(input: Array<{ type: "text"; text: string } | { type: "localImage"; path: string } | { type: "mention"; name: string; path: string }>, options?: ChatStreamOptions): Promise<{ output: string; usage: Record<string, number> }>;
       interrupt(): Promise<boolean>;
       chooseFiles(mode?: "image" | "file"): Promise<Array<{ path: string; name: string; image: boolean; preview?: string }>>;
       savePastedImage(dataUrl: string): Promise<{ path: string; name: string; preview?: string }>;

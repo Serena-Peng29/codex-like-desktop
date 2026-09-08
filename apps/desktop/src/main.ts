@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { buildTurnInputItems, type TurnInput } from "./turn-input.js";
 import { createNewApiClient, type NewApiSession } from "./newapi.js";
 import { installBundledSkills } from "./bundled-skills.js";
+import { DEFAULT_MODEL_ID, isSupportedModelId, selectGatewayModel, type ChatStreamOptions } from "./models.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -126,10 +127,9 @@ let projectPath: string | null = null;
 // env in packaged builds) — no gateway settings are baked into the code. The
 // inline literals below are only dormant last-resort defaults.
 let gatewayModel = "";
-const defaultModel = process.env.NEWAPI_DEFAULT_MODEL?.trim() || "gpt-5.6-sol";
-// Model the sidecar is pinned to via -c: env wins, else the first model the
-// gateway advertised at login. Empty means "no override" — the gateway default
-// applies (the offline fallback below only feeds the plan-mode shim).
+const defaultModel = process.env.NEWAPI_DEFAULT_MODEL?.trim() || DEFAULT_MODEL_ID;
+// The explicit development override wins. Login sessions otherwise prefer the
+// configured product default and only fall back to another advertised chat model.
 function effectiveModel(fallback = defaultModel) {
   return process.env.WAY2AGI_MODEL?.trim() || gatewayModel || fallback;
 }
@@ -177,7 +177,7 @@ function loadStoredSession(): StoredSession | null {
 function clearStoredSession() { try { rmSync(authSessionFile()); } catch { /* already gone */ } }
 
 function adoptSession(stored: StoredSession, models: string[]): AuthSession {
-  gatewayModel = process.env.WAY2AGI_MODEL?.trim() || models[0] || "";
+  gatewayModel = process.env.WAY2AGI_MODEL?.trim() || selectGatewayModel(models, defaultModel);
   const session: AuthSession = {
     accessToken: stored.apiKey,
     user: { id: String(stored.user.id), account: stored.user.displayName || stored.user.username, kind: "gateway" },
@@ -384,15 +384,17 @@ async function ensureActiveThread() {
   return activeThreadId;
 }
 
-async function runAppServerTurn(input: TurnInput[], options?: { effort?: string; planMode?: boolean }) {
+async function runAppServerTurn(input: TurnInput[], options?: ChatStreamOptions) {
   if (activeTurn) throw new Error("turn_already_running");
+  if (options?.model !== undefined && !isSupportedModelId(options.model)) throw new Error("invalid_model");
   const cwd = projectPath ?? undefined;
+  const model = options?.model ?? effectiveModel();
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await ensureActiveThread();
     try {
       return await new Promise<{ output: string; usage: Record<string, number> }>((resolvePromise, reject) => {
         activeTurn = { threadId: activeThreadId!, output: "", usage: {}, resolve: resolvePromise, reject };
-        void sidecar.request("turn/start", { threadId: activeThreadId, ...(cwd ? { cwd, sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd] } } : {}), approvalPolicy: "on-request", effort: options?.effort ?? "medium", ...(options?.planMode ? { collaborationMode: { mode: "plan", settings: { model: effectiveModel(), reasoning_effort: "medium", developer_instructions: null } } } : {}), input: buildTurnInputItems(input) }).then((result) => {
+        void sidecar.request("turn/start", { threadId: activeThreadId, ...(cwd ? { cwd, sandboxPolicy: { type: "workspaceWrite", writableRoots: [cwd] } } : {}), approvalPolicy: "on-request", model, effort: options?.effort ?? "medium", ...(options?.planMode ? { collaborationMode: { mode: "plan", settings: { model, reasoning_effort: "medium", developer_instructions: null } } } : {}), input: buildTurnInputItems(input) }).then((result) => {
           const turn = (result as { turn?: { id?: string } } | null)?.turn;
           if (activeTurn && turn?.id) {
             activeTurn.turnId = turn.id;
@@ -612,7 +614,7 @@ app.whenReady().then(async () => {
     activeThreadId = null;
     persistClientState();
   });
-  ipcMain.handle("chat:stream", (_event, input: TurnInput[], options?: { effort?: string; planMode?: boolean }) => runAppServerTurn(input, options));
+  ipcMain.handle("chat:stream", (_event, input: TurnInput[], options?: ChatStreamOptions) => runAppServerTurn(input, options));
   ipcMain.handle("chat:interrupt", () => interruptActiveTurn());
   ipcMain.handle("chat:choose-files", async (_event, mode?: "image" | "file") => {
     const wantImages = mode !== "file";

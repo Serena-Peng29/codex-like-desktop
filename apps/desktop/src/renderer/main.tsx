@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { AlertTriangle, ArrowUp, Check, ChevronDown, ChevronRight, Copy, Eye, EyeOff, FilePenLine, FileText, Folder, FolderOpen, FolderPlus, Lightbulb, MessageCircle, MessageCirclePlus, Minus, MoreHorizontal, PanelLeft, PanelRight, PanelRightClose, PanelRightOpen, Paperclip, Pencil, Pin, PinOff, Plus, Puzzle, Search, Settings, SlidersHorizontal, Square, SquarePen, Target, User, Wrench, X } from "lucide-react";
 import { removeUtf8Spans, sliceUtf8ByByteRange } from "../turn-input.js";
+import { DEFAULT_MODEL_ID, modelOptions, type SupportedModelId } from "../models.js";
 import "./styles.css";
 
 const brandFavicon = new URL("./brand-favicon.png", import.meta.url).href;
@@ -230,13 +231,6 @@ type ChatMessage = { id: string; role: "user" | "assistant"; content: string; im
 type ProjectGroup = { key: string; path: string | null; name: string; entries: HistoryEntry[]; isCurrent: boolean };
 type ViewPrefs = { grouping: "workspace" | "flat"; sort: "manual" | "recent" };
 
-const modelOptions = [
-  { id: "gpt-6-astra", label: "6 Astra" },
-  { id: "gpt-5.6-sol", label: "5.6 Sol" },
-  { id: "gpt-5.6-terra", label: "5.6 Terra" },
-  { id: "gpt-5.6-luna", label: "5.6 Luna" },
-  { id: "gpt-5.5", label: "5.5" }
-] as const;
 function modelLabel(modelId: string) {
   return modelOptions.find((option) => option.id === modelId)?.label ?? modelId;
 }
@@ -1063,7 +1057,7 @@ function App() {
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<UserImage[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [model, setModel] = useState("gpt-5.6-sol");
+  const [model, setModel] = useState<SupportedModelId>(DEFAULT_MODEL_ID);
   const [intensity, setIntensity] = useState("中");
   const [permission, setPermission] = useState<Permission>("ask");
   const [openMenu, setOpenMenu] = useState<"permission" | "model" | null>(null);
@@ -1486,11 +1480,7 @@ function App() {
       await saveGoal(message);
       return;
     }
-    if (!message && !outgoingAttachments.length) {
-      setNotice("请输入任务内容或添加附件");
-      setErrorMessage("请输入任务内容或添加附件");
-      return;
-    }
+    if (!message && !outgoingAttachments.length) return;
     if (!window.desktop?.stream) {
       setNotice("桌面通信未就绪，请从 Electron 客户端启动");
       setErrorMessage("桌面通信未就绪，请从 Electron 客户端启动");
@@ -1529,7 +1519,7 @@ function App() {
           ? { type: "mention" as const, name: item.name, path: item.path }
           : { type: "localImage" as const, path: item.path })
       ];
-      const result = await window.desktop.stream(turnInput, { effort: intensity === "低" ? "low" : intensity === "高" ? "high" : "medium", planMode: planForThisTurn });
+      const result = await window.desktop.stream(turnInput, { effort: intensity === "低" ? "low" : intensity === "高" ? "high" : "medium", planMode: planForThisTurn, model });
       setMessages((current) => current.map((item) => {
         if (item.id !== assistantId) return item;
         const parts = (item.parts?.length ? item.parts : result.output ? [{ id: `text-${assistantId}`, kind: "text" as const, text: result.output }] : []).map((part) => ({ ...part, streaming: false }));

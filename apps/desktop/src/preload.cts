@@ -1,4 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
+import type { ChatStreamOptions } from "./models.js";
 
 contextBridge.exposeInMainWorld("desktop", {
   window: {
@@ -29,7 +30,7 @@ contextBridge.exposeInMainWorld("desktop", {
   setThreadName: (threadId: string, name: string) => ipcRenderer.invoke("thread:set-name", threadId, name),
   toggleThreadPin: (threadId: string) => ipcRenderer.invoke("thread:toggle-pin", threadId),
   setThreadProject: (threadId: string, projectPath: string | null) => ipcRenderer.invoke("thread:set-project", threadId, projectPath),
-  stream: (input: Array<{ type: "text"; text: string } | { type: "localImage"; path: string } | { type: "mention"; name: string; path: string }>, options?: { effort?: string; planMode?: boolean }) => ipcRenderer.invoke("chat:stream", input, options),
+  stream: (input: Array<{ type: "text"; text: string } | { type: "localImage"; path: string } | { type: "mention"; name: string; path: string }>, options?: ChatStreamOptions) => ipcRenderer.invoke("chat:stream", input, options),
   interrupt: () => ipcRenderer.invoke("chat:interrupt"),
   chooseFiles: (mode?: "image" | "file") => ipcRenderer.invoke("chat:choose-files", mode),
   savePastedImage: (dataUrl: string) => ipcRenderer.invoke("chat:save-pasted-image", dataUrl),
