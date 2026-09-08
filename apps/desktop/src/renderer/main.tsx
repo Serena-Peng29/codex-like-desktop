@@ -230,7 +230,16 @@ type ChatMessage = { id: string; role: "user" | "assistant"; content: string; im
 type ProjectGroup = { key: string; path: string | null; name: string; entries: HistoryEntry[]; isCurrent: boolean };
 type ViewPrefs = { grouping: "workspace" | "flat"; sort: "manual" | "recent" };
 
-const fallbackModelOptions = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.2"];
+const modelOptions = [
+  { id: "gpt-6-astra", label: "6 Astra" },
+  { id: "gpt-5.6-sol", label: "5.6 Sol" },
+  { id: "gpt-5.6-terra", label: "5.6 Terra" },
+  { id: "gpt-5.6-luna", label: "5.6 Luna" },
+  { id: "gpt-5.5", label: "5.5" }
+] as const;
+function modelLabel(modelId: string) {
+  return modelOptions.find((option) => option.id === modelId)?.label ?? modelId;
+}
 const intensityOptions = ["低", "中", "高"];
 const viewPrefsStorageKey = "codex-harness-view-prefs";
 
@@ -1067,9 +1076,6 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [billing, setBilling] = useState<{ signedIn: boolean; balanceUsd: number | null; unlimited: boolean } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  // Model catalog comes from the backend (login bootstrap) when available;
-  // the static list is only the offline fallback.
-  const modelOptions = state?.models?.length ? state.models : fallbackModelOptions;
   const [recentPrompts, setRecentPrompts] = useState<string[]>([
     "检查这个项目的结构并给出改进建议",
     "为这个项目补充一份 README",
@@ -2121,7 +2127,7 @@ function App() {
                   </div>}
                   {openMenu === "model" && <div className="composer-menu model-menu" role="menu" aria-label="模型与推理强度">
                     <div className="menu-title">模型</div>
-                    <div className="menu-options">{modelOptions.map((option) => <button className="menu-option" role="menuitem" key={option} onClick={() => { setModel(option); setOpenMenu(null); }}><span>{option}</span>{model === option && <span className="option-check">✓</span>}</button>)}</div>
+                    <div className="menu-options">{modelOptions.map((option) => <button className="menu-option" role="menuitem" key={option.id} onClick={() => { setModel(option.id); setOpenMenu(null); }}><span>{option.label}</span>{model === option.id && <span className="option-check">✓</span>}</button>)}</div>
                     <div className="menu-divider" />
                     <div className="menu-title">推理强度</div>
                     <div className="menu-options">{intensityOptions.map((option) => <button className="menu-option" role="menuitem" key={option} onClick={() => { setIntensity(option); setOpenMenu(null); }}><span>{option}</span>{intensity === option && <span className="option-check">✓</span>}</button>)}</div>
@@ -2134,7 +2140,7 @@ function App() {
                     {planMode && <button className="composer-pill is-active" title="计划模式仅下一次提问生效（点击关闭）" aria-label="关闭计划模式" onClick={() => setPlanMode(false)}><Lightbulb size={13} /><span>计划模式</span></button>}
                     <button className={`menu-trigger permission-trigger ${permission !== "ask" ? "permission-selected" : ""}`} title="命令权限" aria-label="命令权限" aria-expanded={openMenu === "permission"} onClick={() => { setOpenMenu(openMenu === "permission" ? null : "permission"); setComposerToolsOpen(false); }}><span>{permissionOptions.find((option) => option.value === permission)?.label}</span></button>
                   </div>
-                   <div className="composer-right"><button className="menu-trigger model-trigger" title="选择模型与推理强度" aria-label="选择模型与推理强度" aria-expanded={openMenu === "model"} onClick={() => setOpenMenu(openMenu === "model" ? null : "model")}><span className="model-status-dot" /><span>{model}</span><span className="intensity-label">{intensity}</span></button><button className={`send-button ${sending ? "stop-button" : ""}`} title={sending ? "停止执行" : `发送（${model}，${intensity}强度）`} aria-label={sending ? "停止执行" : "发送"} onClick={() => void (sending ? interruptChat() : runChat())} disabled={!sending && !input.trim() && !attachments.length}><>{sending ? <Square size={16} fill="currentColor" /> : <ArrowUp size={20} />}</></button></div>
+                   <div className="composer-right"><button className="menu-trigger model-trigger" title="选择模型与推理强度" aria-label="选择模型与推理强度" aria-expanded={openMenu === "model"} onClick={() => setOpenMenu(openMenu === "model" ? null : "model")}><span className="model-status-dot" /><span>{modelLabel(model)}</span><span className="intensity-label">{intensity}</span></button><button className={`send-button ${sending ? "stop-button" : ""}`} title={sending ? "停止执行" : `发送（${model}，${intensity}强度）`} aria-label={sending ? "停止执行" : "发送"} onClick={() => void (sending ? interruptChat() : runChat())} disabled={!sending && !input.trim() && !attachments.length}><>{sending ? <Square size={16} fill="currentColor" /> : <ArrowUp size={20} />}</></button></div>
                 </div>
               </div>
             </div>
