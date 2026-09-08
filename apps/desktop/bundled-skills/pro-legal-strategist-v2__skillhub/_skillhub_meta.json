@@ -1,0 +1,18 @@
+{
+  "slug": "pro-legal-strategist-v2",
+  "name": "法律诉讼",
+  "version": "1.0.3",
+  "installedAt": 1788836286082,
+  "source": "skillhub",
+  "namespace": "user_378eb7ca",
+  "canonicalName": "@user_378eb7ca/pro-legal-strategist-v2",
+  "iconSource": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/0c9b068f-f22e-44e2-96fe-d2b6f5b43b07.png",
+  "labels": {
+    "requires_api_key": "false"
+  },
+  "description_zh": "顶级诉讼律师与案件分析专家，执行七步分析法与证据矩阵建模。",
+  "description_en": "顶级诉讼律师与案件分析专家，执行七步分析法与证据矩阵建模。",
+  "installs": 11110,
+  "iconLocalPath": "C:\\Users\\pttve\\.workbuddy\\skills\\pro-legal-strategist-v2__skillhub\\_icon.png",
+  "iconDownloadedFrom": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/0c9b068f-f22e-44e2-96fe-d2b6f5b43b07.png"
+}

@@ -1,0 +1,12 @@
+{
+  "name": "项目有数｜合同检查助手",
+  "installedAt": 1788836254366,
+  "source": "marketplace",
+  "version": "1.0.0",
+  "skillId": "skill_2096318334513360896",
+  "description_zh": "当用户上传合同需要检查文本完整性、一致性与关键条款时触发。本技能检查合同主体、金额、服务内容、付款条件与节点、履约期限、违约责任、发票条款、验收条款、终止条件、争议解决、前后矛盾、空白条款、日期不一致、金额不一致，输出问题清单与修改建议；明确只做合同文本检查，不做法律意见。",
+  "description_en": "Triggered when the user uploads a contract to check textual completeness, consistency, and key clauses. This skill checks parties, amount, scope, payment terms and milestones, performance period, breach liability, invoicing, acceptance, termination, dispute resolution, internal contradictions, blank clauses, date inconsistencies, and amount inconsistencies, and outputs a problem list and suggestions. It performs contract text checking only, not legal advice.",
+  "iconSource": "https://openplatform-cdn.codebuddy.cn/public/common/capability_cover/c486fa49-8537-48ac-ba34-f7b4868e5342/cbe7a498-3595-4afc-8641-174005b35a9f.png",
+  "iconLocalPath": "C:\\Users\\pttve\\.workbuddy\\skills\\contract-check-assistant\\_icon.png",
+  "iconDownloadedFrom": "https://openplatform-cdn.codebuddy.cn/public/common/capability_cover/c486fa49-8537-48ac-ba34-f7b4868e5342/cbe7a498-3595-4afc-8641-174005b35a9f.png"
+}

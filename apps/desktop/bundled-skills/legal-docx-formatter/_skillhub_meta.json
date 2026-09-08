@@ -1,0 +1,10 @@
+{
+  "name": "中文法律报告 Word 排版",
+  "installedAt": 1788836225661,
+  "source": "marketplace",
+  "version": "1.0.0",
+  "skillId": "skill_2090709840747814912",
+  "description_zh": "把中文法律报告从 Markdown 一键转成排版规范的 Word 文档。",
+  "description_en": "Convert Chinese legal reports from Markdown into well-formatted Word (.docx) documents.",
+  "iconSource": "letter:auto"
+}

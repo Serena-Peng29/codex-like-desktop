@@ -1,0 +1,12 @@
+{
+  "name": "同花顺法智_查法条、类案",
+  "installedAt": 1788836237321,
+  "source": "marketplace",
+  "version": "1.0.0",
+  "skillId": "skill_2084504906497310720",
+  "description_zh": "调用2亿+权威法律数据，融入资深律师数十年执业心得，覆盖民商事、刑事、行政、执行等全部法律事由，让Agent真正变成可信赖的法律专家。",
+  "description_en": "Drawing on over 200 million authoritative legal datasets and decades of practical experience from senior practicing lawyers, this system covers all legal matters including civil and commercial law, criminal law, administrative law, and enforcement proceedings, enabling the Agent to evolve into a reliable legal expert.",
+  "iconSource": "https://openplatform-cdn.codebuddy.cn/public/5c2646b6-d24b-42e3-ac18-b2fee6046eb1/avatar/skill/au_317b35f4-fed.png",
+  "iconLocalPath": "C:\\Users\\pttve\\.workbuddy\\skills\\fazhi-law\\_icon.png",
+  "iconDownloadedFrom": "https://openplatform-cdn.codebuddy.cn/public/5c2646b6-d24b-42e3-ac18-b2fee6046eb1/avatar/skill/au_317b35f4-fed.png"
+}

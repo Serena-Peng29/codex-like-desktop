@@ -1,0 +1,18 @@
+{
+  "slug": "law-skills",
+  "name": "法律服务",
+  "version": "6.0.0",
+  "installedAt": 1788836280130,
+  "source": "skillhub",
+  "namespace": "user_5fa95d36",
+  "canonicalName": "@user_5fa95d36/law-skills",
+  "iconSource": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/0c9b068f-f22e-44e2-96fe-d2b6f5b43b07.png",
+  "labels": {
+    "requires_api_key": "false"
+  },
+  "description_zh": "马常成律师（V：malvshi1156）开发开源提供。V6.0.0版本更强更专业！\n功能1：专业法律咨询，根据中国大陆现行有效法律法规，覆盖合同纠纷、民间借贷、劳动争议、婚姻家庭、侵权责任、公司治理等常见民商事领域。五步分析法：事实梳理→法律定性→法条检索→分析论证→实务建议，输出专业、规范、可落地的法律意见。\n功能2：国家法律法规数据库查询 内建核心法律知识库，支持调用全国人大官方数据库（flk.npc.gov.cn）进行法条交叉核验。内置Logic Doctor五维自检机制（法条准确性/逻辑连贯性/时效性/实务可行性/合规性），确保每一份输出达到专业执业水准。\n功能3：写诉状，11种常见的要素式起诉状（包括买卖合同纠纷、借贷纠纷、离婚诉讼、劳动纠纷、交通肇事纠纷等11类，后续更新更多），把案情描述给你的AI，它就可以准确识别+一次性追问关键问题，然后生成专业的要素式起诉状。非标准案由自动使用通用模板，永不卡壳。\n功能4：诉讼时效自动追踪，分析过程中自动检查并提醒各类诉讼/仲裁时效——普通诉讼时效3年、劳动仲裁时效1年、人身损害赔偿3年等，避免错过权利主张期限。",
+  "description_en": "一站式法律服务平台 — 专业法律咨询 + 要素式/通用起诉状起草 + 国家法律法规数据库实时查询。集成flk.npc.gov.cn官方API实时法条查询，本地知识库兜底；支持11个案由要素式起诉状+通用民事起诉状智能生成；内置Logic Doctor逻辑自检、诉讼时效追踪及9类异常容错处理。非标准案由自动使用通用模板。",
+  "installs": 18560,
+  "iconLocalPath": "C:\\Users\\pttve\\.workbuddy\\skills\\law-skills__skillhub\\_icon.png",
+  "iconDownloadedFrom": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/0c9b068f-f22e-44e2-96fe-d2b6f5b43b07.png"
+}

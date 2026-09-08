@@ -11,6 +11,7 @@
   "build": {
     "appId": "com.way2agi.code",
     "productName": "Codex Harness",
+    "electronVersion": "31.7.7",
     "directories": {
       "output": "release"
     },
@@ -22,6 +23,20 @@
       {
         "from": "resources",
         "to": "sidecar"
+      },
+      {
+        "from": "bundled-skills",
+        "to": "bundled-skills",
+        "filter": [
+          "**/*",
+          "!**/.env",
+          "!**/.env.*",
+          "!**/.git/**",
+          "!**/node_modules/**",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/*.log"
+        ]
       }
     ]
   },

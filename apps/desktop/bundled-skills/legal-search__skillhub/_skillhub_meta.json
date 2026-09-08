@@ -1,0 +1,15 @@
+{
+  "slug": "legal-search",
+  "name": "法律数据库检索助手",
+  "version": "1.0.0",
+  "installedAt": 1788836291815,
+  "source": "skillhub",
+  "namespace": "user_72ffbadb",
+  "canonicalName": "@user_72ffbadb/legal-search",
+  "labels": {
+    "requires_api_key": "true"
+  },
+  "description_zh": "AI法律数据库检索助手，为律师、法官助理、法务提供法规检索、案例查证、类案分析，自动生成交互式HTML报告。支持北大法宝MCP/元典MCP双源，覆盖500万+法规、1.6亿+案例。",
+  "description_en": "AI法律数据库检索助手。面向律师、法官助理、法务人员，提供法律法规检索、案例查证、类案分析三大能力，自动生成交互式HTML法律分析报告。支持北大法宝MCP/元典MCP双数据源，覆盖500万+法规、1.6亿+案例。",
+  "installs": 3784
+}

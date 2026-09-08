@@ -1,0 +1,17 @@
+{
+  "slug": "nathan-legal-os-pro",
+  "name": "法律合规",
+  "version": "1.0.2",
+  "installedAt": 1788836285353,
+  "source": "skillhub",
+  "namespace": "user_378eb7ca",
+  "canonicalName": "@user_378eb7ca/nathan-legal-os-pro",
+  "iconSource": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/a4e49550-e527-4406-b761-c4f2e607b757.png",
+  "labels": {
+    "requires_api_key": "true"
+  },
+  "description_zh": "集成实时监管检索、自动化条款穿透分析、时效追踪及公文级报告生成的全功能法律 Skill。支持 PE/VC 私募合规、劳动纠纷判例研判等 8 大垂直场景。内置 Logic Doctor 逻辑自检，确保输出达到专业执业水准。",
+  "installs": 13910,
+  "iconLocalPath": "C:\\Users\\pttve\\.workbuddy\\skills\\nathan-legal-os-pro__skillhub\\_icon.png",
+  "iconDownloadedFrom": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/a4e49550-e527-4406-b761-c4f2e607b757.png"
+}

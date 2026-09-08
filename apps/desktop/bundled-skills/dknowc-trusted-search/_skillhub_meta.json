@@ -1,0 +1,12 @@
+{
+  "name": "深知可信搜索（法律、政策、标准）",
+  "installedAt": 1788836230163,
+  "source": "marketplace",
+  "version": "1.1.4",
+  "skillId": "skill_2088096064710189056",
+  "description_zh": "深知可信搜索（法律、政策、标准）是由北京彩智科技有限公司旗下“深知可信智能”提供的可信搜索与权威材料检索 Skill，面向政策法规、政务办事依据、税务社保、公积金、企业补贴、资质证照、行业标准、公共服务、合规义务、政策调研、城市政策对比和企业投资/技改/税惠材料核验等工作场景。默认调用可信搜索接口，按需调用深度搜索接口，输出带权威来源、知识专库、可点击溯源 HTML 和干净 Markdown 的结果。",
+  "description_en": "dknowc trusted search is a trusted search and authoritative-source retrieval Skill provided by dknowc Trusted Intelligence under Beijing Caizhi Technology Co., Ltd. It supports policy, regulation, government-service evidence, standards, compliance, subsidy, tax-benefit and policy research tasks. It defaults to trusted search, uses deep search only on explicit user request or confirmation, and delivers a direct answer, clickable provenance HTML, and clean Markdown without citation markers.",
+  "iconSource": "https://openplatform-cdn.codebuddy.cn/public/5056f512-f169-42d6-b703-a65b8f89b6e8/avatar/skill/au_d0e1087a-0f8.png",
+  "iconLocalPath": "C:\\Users\\pttve\\.workbuddy\\skills\\dknowc-trusted-search\\_icon.png",
+  "iconDownloadedFrom": "https://openplatform-cdn.codebuddy.cn/public/5056f512-f169-42d6-b703-a65b8f89b6e8/avatar/skill/au_d0e1087a-0f8.png"
+}

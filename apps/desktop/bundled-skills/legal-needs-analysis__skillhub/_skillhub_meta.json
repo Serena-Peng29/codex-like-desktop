@@ -1,0 +1,18 @@
+{
+  "slug": "legal-needs-analysis",
+  "name": "法律需求分析",
+  "version": "1.0.0",
+  "installedAt": 1788836298701,
+  "source": "skillhub",
+  "namespace": "clawhub_zaj7373",
+  "canonicalName": "@clawhub_zaj7373/legal-needs-analysis",
+  "iconSource": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/2d8152d9-7618-454e-9d87-2487f1b4457f.png",
+  "labels": {
+    "requires_api_key": "false"
+  },
+  "description_zh": "将客户的日常语言陈述转化为结构化法律事实和问题，帮助律师快速识别案件性质及处理方向",
+  "description_en": "将客户的日常语言陈述转化为结构化法律事实和问题，帮助律师快速识别案件性质及处理方向。",
+  "installs": 2005,
+  "iconLocalPath": "C:\\Users\\pttve\\.workbuddy\\skills\\legal-needs-analysis__skillhub\\_icon.png",
+  "iconDownloadedFrom": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/2d8152d9-7618-454e-9d87-2487f1b4457f.png"
+}

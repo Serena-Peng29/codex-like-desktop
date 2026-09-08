@@ -1,0 +1,20 @@
+{
+  "name": "Legal Logic Analysis",
+  "installedAt": 1788836168824,
+  "source": "marketplace",
+  "version": "1.0.0",
+  "skillId": "skill_2053082264957227008",
+  "examples_zh": [
+    "分析一份跨境SaaS服务合同：先判断适用管辖，再列出付款、数据合规和违约责任风险",
+    "针对员工离职带走客户名单的情况，梳理关键事实、法律争点、证据缺口和下一步行动",
+    "审查这个房屋租赁纠纷，区分已确认事实、待核实事实、可能适用法律和诉讼风险"
+  ],
+  "examples_en": [
+    "Analyze a cross-border SaaS contract by identifying jurisdiction, payment risks, data-compliance issues, and liability exposure",
+    "For an employee who left with a client list, map the key facts, legal issues, evidence gaps, and next actions",
+    "Review this residential lease dispute and separate confirmed facts, facts to verify, applicable law, and litigation risks"
+  ],
+  "description_zh": "系统化法律推理分析（管辖权、事实、争点、适用法律、风险评估）",
+  "description_en": "Systematic legal reasoning: jurisdiction, issues, law, risk & action",
+  "iconSource": "letter:auto"
+}

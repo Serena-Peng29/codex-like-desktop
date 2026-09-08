@@ -1,0 +1,18 @@
+{
+  "slug": "lawcasecard",
+  "name": "法律案件可视化",
+  "version": "1.0.0",
+  "installedAt": 1788836307387,
+  "source": "skillhub",
+  "namespace": "user_7f6f005f",
+  "canonicalName": "@user_7f6f005f/lawcasecard",
+  "iconSource": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/c5e5faab-b8e1-489d-a489-8b56ffc52c07.png",
+  "labels": {
+    "requires_api_key": "false"
+  },
+  "description_zh": "读取案件资料进行上传的法律案件进行可视化关系，事件时间轴的表达",
+  "description_en": "法律案件分析报告可视化工具，将案件分析报告中的主体关系、债权链条、时间轴、风险矩阵等核心内容转换为专业SVG图表，供律师直观阅读。本技能应在用户需要将法律案件分析报告（如iterative-analysis技能输出的报告）中的文字描述转化为可视化图表时使用。不要用于：生成非法律类图表、通用数据可视化、代码结构分析。",
+  "installs": 957,
+  "iconLocalPath": "C:\\Users\\pttve\\.workbuddy\\skills\\lawcasecard__skillhub\\_icon.png",
+  "iconDownloadedFrom": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/c5e5faab-b8e1-489d-a489-8b56ffc52c07.png"
+}

@@ -1,0 +1,12 @@
+{
+  "name": "法律文书助手",
+  "installedAt": 1788836228815,
+  "source": "marketplace",
+  "version": "1.0.0",
+  "skillId": "skill_2095298619400310784",
+  "description_zh": "本技能用于编写常用法律文书并输出符合规范格式的 Word 文档，以及根据案情生成诉讼评估报告（诉讼风险告知）。支持起草民事/行政/刑事起诉状、答辩状、判决书、调解书四类诉讼文书，内置 GB/T 9704 排版规范（页面/字体/字号/行距/落款）与确定性 docx 生成脚本，一键产出专业、统一的文书底稿。同时可基于用户提供的案情信息，生成《诉讼风险告知》标准结构的评估报告，涵盖风险指数与等级评定、风险提示、行动建议、解决途径、时间与经济成本、法律法规引用及免责声明。适用于律师、企业法务及个人当事人起草诉讼文书、评估诉讼风险的场景。",
+  "description_en": "The skill drafts common Chinese legal documents — civil, administrative, or criminal complaints, statements of defense, judgments, and mediation agreements — and outputs them as standard-formatted Word documents, as well as generates litigation assessment reports (litigation risk disclosure) from case facts. Built-in GB/T 9704 typesetting standards (page setup, fonts, sizes, line spacing, signatures) and a deterministic DOCX generation script produce professional, consistent drafts in one click. Assessment reports follow a standard structure covering risk index and rating, risk alerts, recommended actions, resolution channels, time and economic costs, legal citations, and a disclaimer. Suitable for lawyers, corporate counsel, and individual litigants drafting litigation documents and assessing litigation risk.",
+  "iconSource": "https://openplatform-cdn.codebuddy.cn/public/common/capability_cover/670879b2-693a-455f-87cc-a1af2cf0adc0/42d133a2-4193-40cc-a9ba-71c946706448.png",
+  "iconLocalPath": "C:\\Users\\pttve\\.workbuddy\\skills\\legal-document-writer\\_icon.png",
+  "iconDownloadedFrom": "https://openplatform-cdn.codebuddy.cn/public/common/capability_cover/670879b2-693a-455f-87cc-a1af2cf0adc0/42d133a2-4193-40cc-a9ba-71c946706448.png"
+}

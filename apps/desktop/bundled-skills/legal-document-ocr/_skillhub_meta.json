@@ -1,0 +1,10 @@
+{
+  "name": "法律文书 OCR",
+  "installedAt": 1788836232276,
+  "source": "marketplace",
+  "version": "1.0.8",
+  "skillId": "skill_2095125982764158976",
+  "description_zh": "把法律文书（判决书、裁定书、调解书、公安文书、公证书等带公章的 PDF）逐页识别为可编辑文字。视觉大模型 OCR 智能处理红章与正文取舍，自动忽略页眉页脚与正文背景水印，识别后自动语义纠错、多页并发提速。",
+  "description_en": "OCR legal documents (judgments, rulings, mediation papers, public security / notary documents, etc. with official seals) page by page into editable text. Vision-LLM based, auto-handles red seal vs. body text trade-off, ignores headers / footers / background watermarks, post-OCR semantic correction, multi-page concurrency.",
+  "iconSource": "letter:auto"
+}

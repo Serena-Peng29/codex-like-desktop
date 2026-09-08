@@ -1,0 +1,2 @@
+# Preserve third-party skill sources verbatim; some Markdown uses trailing spaces for line breaks.
+apps/desktop/bundled-skills/** -whitespace

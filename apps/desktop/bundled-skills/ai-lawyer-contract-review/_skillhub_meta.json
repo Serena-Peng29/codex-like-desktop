@@ -1,0 +1,12 @@
+{
+  "name": "AI律师网合同审查SKill",
+  "installedAt": 1788836243147,
+  "source": "marketplace",
+  "version": "2.0.0",
+  "skillId": "skill_2095082739749453824",
+  "description_zh": "AI律师网合同审查SKill——全场景合同审查与法律合规专家（2024-2025法律环境升级版）。整合六大能力：(1) 批量合同审查与多格式支持（PDF/DOCX/TXT/图片）(2) 数据合规审查（PIPL/DSL/CSL/网络数据安全管理条例）(3) 逐句修订+Word原生Track Changes+模板化修订(4) DOCX底层读写/修订/定稿工具链 (5) 25+种合同类型指引、风险分级、法律意见书生成 (6) 民法典合同编司法解释(2023)全量规则映射。当用户需要审查合同、审核合同、修订合同、审阅合同、合同风险分析、合规审查、隐私政策审查、批量处理合同、逐句修订、Track Changes、法律意见书、参照范本修订、数据合规、PIPL合规、App隐私合规、AI合同、数据处理合同、数据跨境、SaaS合同、直播合同、跨境合同、算法合规时，使用此技能。",
+  "description_en": "AI Lawyer Contract Review Skill - an all-scenario contract review and legal compliance expert under Chinese law (upgraded for the 2024-2025 legal environment). Six capabilities: (1) batch contract review for PDF/DOCX/TXT/images; (2) data compliance review (PIPL/DSL/CSL, Network Data Security Management Regulation); (3) sentence-by-sentence revision with native Word Track Changes; (4) low-level DOCX read/redline/finalize toolchain; (5) 25+ contract-type playbooks, risk grading, and legal opinion drafting; (6) full rule mapping of the 2023 Judicial Interpretation of the PRC Civil Code Contract Book. Use for contract review, revision, risk analysis, compliance and privacy policy review, Track Changes redlining, legal opinions, template-based revision, PIPL and app privacy compliance, AI/data processing/cross-border/SaaS/livestreaming contracts, and algorithm compliance.",
+  "iconSource": "https://openplatform-cdn.codebuddy.cn/public/common/capability_cover/d8689b7c-164f-4fc6-9ea1-a48c15fd0d8b/c3829f1b-f040-46c8-a0ec-29eefd257a6d.jpg",
+  "iconLocalPath": "C:\\Users\\pttve\\.workbuddy\\skills\\ai-lawyer-contract-review\\_icon.jpg",
+  "iconDownloadedFrom": "https://openplatform-cdn.codebuddy.cn/public/common/capability_cover/d8689b7c-164f-4fc6-9ea1-a48c15fd0d8b/c3829f1b-f040-46c8-a0ec-29eefd257a6d.jpg"
+}

@@ -8,6 +8,7 @@ import { basename, delimiter, dirname, join, relative, resolve, sep } from "node
 import { fileURLToPath } from "node:url";
 import { buildTurnInputItems, type TurnInput } from "./turn-input.js";
 import { createNewApiClient, type NewApiSession } from "./newapi.js";
+import { installBundledSkills } from "./bundled-skills.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -436,6 +437,18 @@ async function startSidecar() {
 }
 
 app.whenReady().then(async () => {
+  const bundledSkillsSource = app.isPackaged
+    ? join(process.resourcesPath, "bundled-skills")
+    : join(projectRoot, "apps", "desktop", "bundled-skills");
+  const bundledSkillsTarget = join(app.getPath("userData"), "codex-home", "skills");
+  try {
+    const installed = installBundledSkills(bundledSkillsSource, bundledSkillsTarget);
+    if (installed.installed.length || installed.updated.length || installed.skipped.length) {
+      console.log(`bundled skills: installed=${installed.installed.length}, updated=${installed.updated.length}, preserved=${installed.skipped.length}`);
+    }
+  } catch (error) {
+    console.error(`bundled skills installation failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
   loadClientState();
   // The login gate is in play for packaged builds (the product has no offline
   // demo mode) and for dev runs that do not provide the WAY2AGI gateway env

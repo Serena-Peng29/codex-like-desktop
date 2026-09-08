@@ -1,0 +1,18 @@
+{
+  "slug": "cue-legal-research",
+  "name": "法律合规研究",
+  "version": "1.2.5",
+  "installedAt": 1788836302662,
+  "source": "skillhub",
+  "namespace": "user_b8060655",
+  "canonicalName": "@user_b8060655/cue-legal-research",
+  "iconSource": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/7422abc7-fa86-4505-a723-0575c56e7a2d.png",
+  "labels": {
+    "requires_api_key": "true"
+  },
+  "description_zh": "面向法务、合规与投行团队，用 Cue 跑企业法律合规的深度研究：合规风险体检、监管问询答复、法规原文调研、类案裁判检索、监管处罚雷达、诉讼文书起草，多源公开数据交叉、每条结论带来源链接。 Triggers: 法律尽调、企业合规、法规调研、监管处罚、类案检索、诉讼文书、问询答复 NOT for: 出具正式法律意见、替代律师执业判断、实时行情查询、需要私有数据的场景、企业出海/跨境合规（走 cue-overseas-compliance）",
+  "description_en": "面向法务、合规与投行团队，用 Cue 跑企业法律合规的深度研究：合规风险体检、监管问询答复、法规原文调研、类案裁判检索、监管处罚雷达、诉讼文书起草，多源公开数据交叉、每条结论带来源链接。 Triggers: 法律尽调、企业合规、法规调研、监管处罚、类案检索、诉讼文书、问询答复 NOT for: 出具正式法律意见、替代律师执业判断、实时行情查询、需要私有数据的场景、企业出海/跨境合规（走 cue-overseas-compliance）",
+  "installs": 2548,
+  "iconLocalPath": "C:\\Users\\pttve\\.workbuddy\\skills\\cue-legal-research__skillhub\\_icon.png",
+  "iconDownloadedFrom": "https://cloudcache.tencent-cloud.com/qcloud/ui/static/other_external_resource/7422abc7-fa86-4505-a723-0575c56e7a2d.png"
+}
